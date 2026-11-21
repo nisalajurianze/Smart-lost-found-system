@@ -15,7 +15,6 @@ import { resolveItemHandover, cancelItemHandover } from '../services/itemWorkflo
 import { itemView } from '../utils/serializers.js';
 import { locationIntelligenceView, resolveLocation } from '../services/locationIntelligenceService.js';
 import { resolveOrCreateUserCategory } from '../services/categoryResolutionService.js';
-import { verifyReportImages } from '../services/imageAnalysisService.js';
 
 const cacheKeys = ['lostItems:*', 'cache:/api/lost-items*'];
 const parseTags = (value) => [...new Set((Array.isArray(value) ? value : String(value || '').split(','))
@@ -40,7 +39,6 @@ const activeCategory = (name) => resolveOrCreateUserCategory(name);
 const createLostItem = asyncHandler(async (req, res) => {
   const category = await activeCategory(req.body.category);
   if (!category) throw ApiError.badRequest('Enter a valid category name.');
-  await verifyReportImages(req.files || []);
   const images = await uploadMultipleReportImages(req.files || [], 'lost-items');
   const session = await mongoose.startSession();
   let item;
@@ -123,7 +121,6 @@ const updateLostItem = asyncHandler(async (req, res) => {
   const imagesToDelete = item.images.filter((image) => requestedDeletes.has(image.url));
   const imagesLeft = item.images.filter((image) => !requestedDeletes.has(image.url));
   if (imagesLeft.length + (req.files?.length || 0) > 5) throw ApiError.badRequest('Maximum 5 images allowed.');
-  await verifyReportImages(req.files || []);
   const newImages = await uploadMultipleReportImages(req.files || [], 'lost-items');
   const session = await mongoose.startSession();
   try {

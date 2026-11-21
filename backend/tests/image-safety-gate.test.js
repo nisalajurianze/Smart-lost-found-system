@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { resetAiProviderStateForTests } from '../services/aiProviderService.js';
 import { verifyReportImages } from '../services/imageAnalysisService.js';
+import { cloudinary } from '../config/cloudinary.js';
+import { initCloudinary, uploadMultipleReportImages } from '../services/cloudinaryService.js';
 
 const validImage = { buffer: Buffer.from('test-image'), mimetype: 'image/png' };
 const responseFor = (value) => ({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: JSON.stringify(value) } }] }) });
@@ -14,6 +16,8 @@ const baseSuggestion = {
   imageQuality: 'good',
   moderationDecision: 'allow',
   privacyWarnings: [],
+  redactionRegions: [],
+  ocrRegions: [],
   safetyLabels: [],
 };
 
@@ -117,4 +121,68 @@ test('provider safety refusal is a rejection, not an outage', async (t) => {
   t.mock.method(global, 'fetch', async () => ({ ok: true, json: async () => ({ choices: [{ message: { refusal: 'Policy refusal' }, finish_reason: 'content_filter' }] }) }));
   resetAiProviderStateForTests();
   await assert.rejects(() => verifyReportImages([validImage]), (error) => error.code === 'IMAGE_NOT_ALLOWED' && /safety policy/.test(error.message));
+});
+
+test('public report storage accepts a clear item while blocking missing or flagged privacy evidence before upload', async (t) => {
+  const originalEnv = { ...process.env };
+  t.after(() => {
+    for (const key of Object.keys(process.env)) if (!(key in originalEnv)) delete process.env[key];
+    Object.assign(process.env, originalEnv);
+    resetAiProviderStateForTests();
+  });
+  Object.assign(process.env, {
+    AI_ENABLED: 'true', AI_API_KEY: 'test-key', AI_API_URL: 'https://vision.example.test/chat',
+    AI_VISION_PROVIDER: 'primary', AI_VISION_MODEL: 'vision-test', AI_MAX_ATTEMPTS: '1',
+    CLOUDINARY_CLOUD_NAME: 'privacy-test', CLOUDINARY_API_KEY: 'fixture-key', CLOUDINARY_API_SECRET: 'fixture-value',
+  });
+  resetAiProviderStateForTests();
+  assert.equal(initCloudinary(), true);
+
+  let replies = [];
+  t.mock.method(global, 'fetch', async () => responseFor(replies.shift()));
+  const stored = [];
+  t.mock.method(cloudinary.uploader, 'upload_stream', (options, done) => ({
+    end(buffer) {
+      assert.strictEqual(buffer, validImage.buffer);
+      stored.push(options);
+      done(null, {
+        public_id: options.folder + '/preview',
+        secure_url: 'https://cdn.example/preview.jpg',
+        format: 'jpg',
+        type: options.type,
+      });
+    },
+  }));
+
+  replies = [baseSuggestion, { ...baseSuggestion, privacyWarnings: ['Identity card in background'] }];
+  await assert.rejects(() => uploadMultipleReportImages([validImage, validImage], 'lost-items'), {
+    code: 'IMAGE_PRIVACY_REVIEW',
+    statusCode: 400,
+  });
+  assert.deepEqual(stored, []);
+
+  replies = [{ ...baseSuggestion, ocrRegions: [{ category: 'item-marking', text: '0771234567' }] }];
+  await assert.rejects(() => uploadMultipleReportImages([validImage], 'found-items'), { code: 'IMAGE_PRIVACY_REVIEW' });
+  assert.deepEqual(stored, []);
+
+  replies = [{ ...baseSuggestion, redactionRegions: [{ reason: 'Visible face', x: 0, y: 0, width: 0.2, height: 0.2 }] }];
+  await assert.rejects(() => uploadMultipleReportImages([validImage], 'found-items'), { code: 'IMAGE_PRIVACY_REVIEW' });
+  assert.deepEqual(stored, []);
+
+  replies = [{ ...baseSuggestion, ocrRegions: undefined }];
+  await assert.rejects(() => uploadMultipleReportImages([validImage], 'lost-items'), { code: 'IMAGE_SAFETY_UNAVAILABLE' });
+  assert.deepEqual(stored, []);
+
+  replies = [{ ...baseSuggestion, ocrRegions: [{ category: 'item-marking', text: 'Logitech G502' }] }];
+  const [safeImage] = await uploadMultipleReportImages([validImage], 'lost-items');
+  assert.equal(stored[0].type, 'authenticated');
+  assert.equal(stored[1].type, 'upload');
+  assert.deepEqual(stored[1].transformation, [{ width: 900, height: 900, crop: 'limit', quality: 75, flags: 'force_strip' }]);
+  assert.equal(safeImage.privacyStatus, 'safe_public');
+  assert.equal(safeImage.url, 'https://cdn.example/preview.jpg');
+  assert.deepEqual(safeImage.originalAsset, {
+    publicId: 'lost-items/originals/preview',
+    format: 'jpg',
+    deliveryType: 'authenticated',
+  });
 });
