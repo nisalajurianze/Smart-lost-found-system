@@ -62,6 +62,23 @@ test.describe('Smart Lost & Found - Web App Smoke Suite', () => {
     expect(hasHorizontalScrollbar).toBe(false);
   });
 
+  test('the mobile assistant opens with a readable composer and waits for a tap to type', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 660 });
+    await page.goto('/');
+    const launcher = page.getByRole('button', { name: 'Open Smart L&F assistant' });
+    await launcher.click();
+    const dialog = page.getByRole('dialog', { name: 'Smart L&F Assistant' });
+    const input = dialog.getByRole('textbox', { name: 'Ask about a lost or found item' });
+    await expect(dialog).toBeFocused();
+    await expect(dialog.getByText(/Tell me what you lost or found/)).toBeInViewport();
+    await expect.poll(() => input.evaluate((element) => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1);
+    await expect(dialog.getByRole('button', { name: 'Send message' })).toBeInViewport();
+    await input.click();
+    await expect(input).toBeFocused();
+    await dialog.getByRole('button', { name: 'Close assistant', exact: true }).click();
+    await expect(launcher).toBeFocused();
+  });
+
   test('a loaded listing photo is visible on the public card', async ({ page }) => {
     const item = {
       _id: '507f1f77bcf86cd799439011',

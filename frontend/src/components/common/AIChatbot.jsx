@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   FiAlertCircle,
   FiChevronRight,
@@ -57,7 +57,20 @@ const voiceOptions = (t) => [
 ];
 
 const DEFAULT_QUICK_REPLIES = ['I lost something', 'I found something', 'My reports'];
+const COMPACT_ASSISTANT = '(max-width: 639px)';
 const isSafeCitationUrl = (value) => isSafeInternalPath(value) || /^https:\/\/(?:www\.)?seu\.ac\.lk(?:\/|$)/iu.test(String(value || ''));
+
+const focusConversation = (dialog, input) => {
+  const manualInput = window.matchMedia(`${COMPACT_ASSISTANT}, (pointer: coarse)`).matches;
+  const target = manualInput ? dialog : input;
+  target?.focus({ preventScroll: true });
+};
+
+const fitComposer = (input) => {
+  if (!input) return;
+  input.style.height = 'auto';
+  input.style.height = `${input.scrollHeight}px`;
+};
 
 const REPORT_DRAFT_COPY = {
   en: {
@@ -232,7 +245,7 @@ const AIChatbot = () => {
   const [historyReady, setHistoryReady] = useState(false);
   const [isSubmittingReport, setIsSubmittingReport] = useState(false);
   const [speakingMessage, setSpeakingMessage] = useState(-1);
-  const messagesEndRef = useRef(null);
+  const messageStreamRef = useRef(null);
   const dialogRef = useRef(null);
   const floatingButtonRef = useRef(null);
   const inputRef = useRef(null);
@@ -240,7 +253,6 @@ const AIChatbot = () => {
   const utteranceRef = useRef(null);
   const voiceConsentRef = useRef(false);
   const reportSubmissionInFlightRef = useRef(false);
-  const lastFocusedRef = useRef(null);
   const suppressHistoryWriteRef = useRef(false);
 
   useEffect(() => () => {
@@ -319,7 +331,7 @@ const AIChatbot = () => {
     setQuickReplies(DEFAULT_QUICK_REPLIES);
     setInput('');
     setHistoryOpen(false);
-    window.requestAnimationFrame(() => inputRef.current?.focus());
+    focusConversation(dialogRef.current, inputRef.current);
   };
 
   const openConversation = (conversation) => {
@@ -329,7 +341,7 @@ const AIChatbot = () => {
     setMessages(conversation.messages.length ? conversation.messages : [initialMessage(t)]);
     setQuickReplies([]);
     setHistoryOpen(false);
-    window.requestAnimationFrame(() => inputRef.current?.focus());
+    focusConversation(dialogRef.current, inputRef.current);
   };
 
   const deleteConversation = (conversationIdToDelete) => {
@@ -407,15 +419,16 @@ const AIChatbot = () => {
   }, [isOpen]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [messages, quickReplies, isLoading]);
+    const stream = messageStreamRef.current;
+    if (stream) stream.scrollTop = messages.length > 1 ? stream.scrollHeight : 0;
+  }, [isOpen, messages, quickReplies, isLoading, mobileViewport?.height]);
 
   useEffect(() => {
     if (!isOpen) return undefined;
-    lastFocusedRef.current = document.activeElement;
+    const launcher = floatingButtonRef.current;
     const previousOverflow = document.body.style.overflow;
-    if (window.matchMedia('(max-width: 639px)').matches) document.body.style.overflow = 'hidden';
-    window.requestAnimationFrame(() => inputRef.current?.focus());
+    if (window.matchMedia(COMPACT_ASSISTANT).matches) document.body.style.overflow = 'hidden';
+    focusConversation(dialogRef.current, inputRef.current);
 
     const handleKeyDown = (event) => {
       if (event.key === 'Escape') {
@@ -424,11 +437,11 @@ const AIChatbot = () => {
         return;
       }
       if (event.key !== 'Tab' || !dialogRef.current) return;
-      const focusable = [...dialogRef.current.querySelectorAll('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])')];
+      const focusable = [...dialogRef.current.querySelectorAll('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')];
       if (!focusable.length) return;
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
+      if (event.shiftKey && (document.activeElement === first || document.activeElement === dialogRef.current)) {
         event.preventDefault();
         last.focus();
       } else if (!event.shiftKey && document.activeElement === last) {
@@ -442,7 +455,7 @@ const AIChatbot = () => {
       document.removeEventListener('keydown', handleKeyDown);
       document.body.style.overflow = previousOverflow;
       recognitionRef.current?.stop?.();
-      lastFocusedRef.current?.focus?.();
+      launcher?.focus({ preventScroll: true });
     };
   }, [isOpen]);
 
@@ -453,7 +466,7 @@ const AIChatbot = () => {
     }
     const viewport = window.visualViewport;
     const syncViewport = () => {
-      if (!window.matchMedia('(max-width: 639px)').matches) {
+      if (!window.matchMedia(COMPACT_ASSISTANT).matches) {
         setMobileViewport(null);
         return;
       }
@@ -462,14 +475,21 @@ const AIChatbot = () => {
         top: Math.round(viewport?.offsetTop || 0),
       });
     };
+    const handleResize = () => {
+      syncViewport();
+      fitComposer(inputRef.current);
+    };
+    const handleFontsLoaded = () => fitComposer(inputRef.current);
     syncViewport();
     viewport?.addEventListener('resize', syncViewport);
     viewport?.addEventListener('scroll', syncViewport);
-    window.addEventListener('orientationchange', syncViewport);
+    window.addEventListener('resize', handleResize);
+    document.fonts?.addEventListener('loadingdone', handleFontsLoaded);
     return () => {
       viewport?.removeEventListener('resize', syncViewport);
       viewport?.removeEventListener('scroll', syncViewport);
-      window.removeEventListener('orientationchange', syncViewport);
+      window.removeEventListener('resize', handleResize);
+      document.fonts?.removeEventListener('loadingdone', handleFontsLoaded);
     };
   }, [isOpen]);
 
@@ -535,21 +555,9 @@ const AIChatbot = () => {
     }
   };
 
-  const adjustTextareaHeight = () => {
-    if (inputRef.current) {
-      inputRef.current.style.height = 'auto';
-      inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 180)}px`;
-    }
-  };
-
-  const handleInputChange = (event) => {
-    setInput(event.target.value);
-    adjustTextareaHeight();
-  };
-
-  useEffect(() => {
-    adjustTextareaHeight();
-  }, [input]);
+  useLayoutEffect(() => {
+    fitComposer(inputRef.current);
+  }, [isOpen, input, t]);
 
   const handleSubmit = (event) => {
     event.preventDefault();
@@ -673,13 +681,14 @@ const AIChatbot = () => {
       <section
         ref={dialogRef}
         role="dialog"
+        tabIndex={-1}
         aria-modal="true"
         aria-labelledby="smart-lf-assistant-title"
-        className="fixed inset-0 z-[80] flex flex-col overflow-hidden bg-white shadow-2xl dark:bg-surface-900 sm:inset-y-4 sm:left-auto sm:right-4 sm:w-[min(32rem,calc(100vw-2rem))] sm:rounded-2xl sm:border sm:border-surface-200/80 sm:dark:border-surface-700/80"
+        className="fixed inset-0 z-[80] flex flex-col overflow-hidden bg-white shadow-2xl outline-none dark:bg-surface-900 sm:inset-y-4 sm:left-auto sm:right-4 sm:w-[min(32rem,calc(100vw-2rem))] sm:rounded-2xl sm:border sm:border-surface-200/80 sm:dark:border-surface-700/80"
         style={mobileViewport ? { height: `${mobileViewport.height}px`, top: `${mobileViewport.top}px`, bottom: 'auto' } : undefined}
       >
         {/* Modern Header */}
-        <header className="flex min-h-16 items-center justify-between gap-2.5 border-b border-surface-200/80 bg-white/95 px-3.5 sm:px-4 py-2.5 sm:py-3 backdrop-blur-md dark:border-surface-700/80 dark:bg-surface-900/95">
+        <header className="flex min-h-16 shrink-0 items-center justify-between gap-2.5 border-b border-surface-200/80 bg-white/95 px-3.5 sm:px-4 py-2.5 sm:py-3 backdrop-blur-md dark:border-surface-700/80 dark:bg-surface-900/95">
           <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
             <div className="relative flex h-9 w-9 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-tr from-primary-600 to-indigo-500 text-white shadow-md shadow-primary-500/20">
               <FaRobot className="h-4 w-4 sm:h-5 sm:w-5" aria-hidden="true" />
@@ -774,7 +783,7 @@ const AIChatbot = () => {
         )}
 
         {/* Message Stream */}
-        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4" aria-live="polite" aria-relevant="additions">
+        <div ref={messageStreamRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4" aria-live="polite" aria-relevant="additions">
           {messages.map((message, index) => (
             <div key={`${message.timestamp}-${index}`} className={`flex flex-col ${message.role === 'user' ? 'items-end' : 'items-start'}`}>
               <div className="flex items-start gap-2.5 max-w-[92%]">
@@ -947,18 +956,17 @@ const AIChatbot = () => {
               ))}
             </div>
           )}
-          <div ref={messagesEndRef} />
         </div>
 
         {/* Polished Capsule Input Bar */}
-        <form onSubmit={handleSubmit} className="border-t border-surface-200/80 bg-white p-3 pb-[calc(env(safe-area-inset-bottom,0px)+0.75rem)] dark:border-surface-700/80 dark:bg-surface-900">
+        <form onSubmit={handleSubmit} className="max-h-[calc(100%-4rem)] shrink-0 overflow-y-auto overscroll-contain border-t border-surface-200/80 bg-white p-3 pb-[calc(env(safe-area-inset-bottom,0px)+0.75rem)] dark:border-surface-700/80 dark:bg-surface-900">
           <div className="rounded-2xl border border-surface-300/80 bg-surface-50/90 p-2 shadow-inner-sm focus-within:border-primary-500 focus-within:bg-white focus-within:ring-2 focus-within:ring-primary-500/20 dark:border-surface-700 dark:bg-surface-800/60 dark:focus-within:bg-surface-800 transition-all">
             <label htmlFor="assistant-message" className="sr-only">{t('assistant.inputLabel')}</label>
             <textarea
               ref={inputRef}
               id="assistant-message"
               value={input}
-              onChange={handleInputChange}
+              onChange={(event) => setInput(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter' && !event.shiftKey) {
                   event.preventDefault();
@@ -968,8 +976,7 @@ const AIChatbot = () => {
               rows={1}
               maxLength={500}
               placeholder={t('assistant.placeholder')}
-              className="w-full resize-none border-0 bg-transparent px-2.5 py-1.5 text-sm leading-relaxed text-surface-900 placeholder:text-surface-400 outline-none dark:text-white dark:placeholder:text-surface-500 max-h-40 overflow-y-auto"
-              style={{ minHeight: '38px' }}
+              className="block min-h-11 w-full max-h-28 resize-none overflow-y-auto border-0 bg-transparent px-2.5 py-1.5 text-base leading-relaxed text-surface-900 outline-none placeholder:text-surface-400 sm:max-h-40 sm:text-sm dark:text-white dark:placeholder:text-surface-500"
             />
             
             <div className="mt-1 flex items-center justify-between gap-2 border-t border-surface-200/60 pt-2 dark:border-surface-700/60">
