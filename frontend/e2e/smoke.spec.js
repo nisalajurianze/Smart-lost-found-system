@@ -152,7 +152,7 @@ test.describe('Smart Lost & Found - Web App Smoke Suite', () => {
     await expect(chat).toHaveCount(0);
   });
 
-  test('a loaded listing photo is visible on the public card', async ({ page }) => {
+  test('a loaded listing photo stays visible without a separate background', async ({ page }) => {
     const item = {
       _id: '507f1f77bcf86cd799439011',
       itemName: 'Preview mouse',
@@ -172,6 +172,8 @@ test.describe('Smart Lost & Found - Web App Smoke Suite', () => {
     await photo.scrollIntoViewIfNeeded();
     await expect.poll(() => photo.evaluate(image => image.naturalWidth)).toBeGreaterThan(0);
     await expect(photo).toHaveCSS('opacity', '1');
+    await expect(photo).toHaveCSS('object-fit', 'contain');
+    await expect(photo.locator('..')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
   });
 
   test('7. End-to-end Login, Session Validation, Dashboard & Logout flow', async ({ page }) => {
