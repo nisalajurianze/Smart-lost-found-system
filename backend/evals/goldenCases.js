@@ -1,5 +1,9 @@
 const goldenCases = Object.freeze([
   {
+    id: 'conversation-singlish-finder-split-spelling', capability: 'conversation', language: 'singlish',
+    input: 'gaming mouse ekak hamba una library eke tiyala', expected: { style: 'singlish', intent: 'found' },
+  },
+  {
     id: 'conversation-singlish-lost', capability: 'conversation', language: 'singlish',
     input: 'mata kalu phone ekak library laga nathi una', expected: { style: 'singlish', intent: 'lost' },
   },

@@ -15,21 +15,27 @@ const REMOVE_PATTERN = /\b(?:remove|delete|clear|ain karanna|ඉවත්|நீ
 const QUESTION_COPY = {
   en: {
     itemName: 'What item was lost or found?', category: 'Which report category best fits the item?', location: 'Where exactly did this happen?', date: 'What date and approximate time was it?',
+    lostLocation: 'Where did you last see it?', foundLocation: 'Where did you find it?',
     uniqueFeatures: 'What one unique feature can identify it?', storedAt: 'Where is the found item being kept safely?',
   },
   singlish: {
-    itemName: 'Nathi une hari hambune hari mona item ekakda?', category: 'Item ekata galapena report category eka mokakda?', location: 'Hariyatama meka une koheda?', date: 'Mona dawaseda, lagadi welawa mokakda?',
-    uniqueFeatures: 'Item eka handunaganna puluwan wenama lakunayak mokakda?', storedAt: 'Hambuna item eka dan arakshithawa thiyenne koheda?',
+    itemName: 'Mona item ekakda?', category: 'Item eke category eka mokakda?', location: 'Hariyatama meka une koheda?', date: 'Mona dawaseda? Welawa mathaka nam ekath kiyanna.',
+    lostLocation: 'Anthimata item eka dakke koheda?', foundLocation: 'Item eka hambune koheda?',
+    uniqueFeatures: 'Item eka handunaganna wenama lakunayak thiyenawada?', storedAt: 'Item eka dan koheda? Kaata hari bara dunna nam, bara dunne kaatada?',
   },
   si: {
     itemName: 'නැති වූ හෝ හමු වූ භාණ්ඩය මොකක්ද?', category: 'භාණ්ඩයට ගැළපෙන වාර්තා කාණ්ඩය කුමක්ද?', location: 'මෙය සිදු වූ නිශ්චිත ස්ථානය කොහේද?', date: 'දිනය සහ ආසන්න වේලාව කුමක්ද?',
+    lostLocation: 'අන්තිමට භාණ්ඩය දැක්කේ කොහේද?', foundLocation: 'භාණ්ඩය හමු වුණේ කොහේද?',
     uniqueFeatures: 'එය හඳුනාගත හැකි එක් සුවිශේෂී ලක්ෂණයක් කුමක්ද?', storedAt: 'හමු වූ භාණ්ඩය දැන් ආරක්ෂිතව තබා ඇත්තේ කොහේද?',
   },
   ta: {
     itemName: 'தொலைந்த அல்லது கிடைத்த பொருள் என்ன?', category: 'பொருளுக்கு ஏற்ற அறிக்கை வகை எது?', location: 'இது நடந்த சரியான இடம் எது?', date: 'தேதி மற்றும் சுமார் நேரம் என்ன?',
+    lostLocation: 'பொருளை கடைசியாக எங்கே பார்த்தீர்கள்?', foundLocation: 'பொருளை எங்கே கண்டெடுத்தீர்கள்?',
     uniqueFeatures: 'அதை அடையாளம் காண ஒரு தனித்துவமான அம்சம் என்ன?', storedAt: 'கிடைத்த பொருள் தற்போது பாதுகாப்பாக எங்கு வைக்கப்பட்டுள்ளது?',
   },
 };
+
+const questionFor = (style, reportType, nextField) => (QUESTION_COPY[style] || QUESTION_COPY.en)[nextField === 'location' ? `${reportType}Location` : nextField] || '';
 
 const valueOf = (slot) => slot?.value ?? '';
 const cleanText = (value, max = 300) => String(value || '').normalize('NFKC').replace(/\s+/g, ' ').trim().slice(0, max);
@@ -56,7 +62,7 @@ const missingFields = (reportType, fields) => [
   ...(reportType === 'found' ? [['storedAt', fields.storedAt]] : []),
 ].filter(([, value]) => !cleanText(value)).map(([field]) => field);
 
-const candidateValues = (message, reportType, nextField, now, { allowContextFill = true } = {}) => {
+const candidateValues = (message, reportType, nextField, now, { allowContextFill = true, useFreeText = true } = {}) => {
   const parsed = buildConversationalReportDraft({ message, intent: reportType, now });
   const fields = parsed?.fields || {};
   const candidates = {};
@@ -73,7 +79,7 @@ const candidateValues = (message, reportType, nextField, now, { allowContextFill
   if (allowContextFill && !bareItemCorrection && ['uniqueFeatures', 'storedAt'].includes(nextField)) {
     for (const field of ['itemName', 'category', 'colors', 'location', 'date', 'brand']) delete candidates[field];
   }
-  if (allowContextFill && canUseFreeTextForNextField && nextField && !candidates[nextField] && text.length >= 2) {
+  if (allowContextFill && useFreeText && canUseFreeTextForNextField && nextField && !candidates[nextField] && text.length >= 2) {
     if (nextField === 'uniqueFeatures') candidates.uniqueFeatures = { value: text, confidence: 75 };
     if (nextField === 'storedAt') candidates.storedAt = { value: text, confidence: 70 };
     if (nextField === 'location') candidates.location = { value: text, confidence: 60 };
@@ -109,7 +115,10 @@ const advanceConversationState = ({ previousState = {}, message, intent, respons
     changes = appendChange(changes.slice(0, -1), { field: previous.field, before: previous.after, after: previous.before, operation: 'undo', turn, at: now });
   } else {
     const correction = CORRECTION_PATTERN.test(text);
-    const candidates = NON_DETAIL_PATTERN.test(text) ? {} : extractedUpdates ?? candidateValues(text, reportType, previousState.nextField, now, { allowContextFill: !correction }).candidates;
+    const candidates = NON_DETAIL_PATTERN.test(text) ? {} : {
+      ...candidateValues(text, reportType, previousState.nextField, now, { allowContextFill: !correction, useFreeText: extractedUpdates === null }).candidates,
+      ...extractedUpdates,
+    };
     if (REMOVE_PATTERN.test(text)) {
       const field = removalField(text) || previousState.nextField;
       if (field && slots[field] && cleanText(valueOf(slots[field]))) candidates[field] = { value: '', confidence: 100, remove: true };
@@ -134,11 +143,10 @@ const advanceConversationState = ({ previousState = {}, message, intent, respons
   const fields = draftFieldsFromSlots(slots);
   const missing = missingFields(reportType, fields);
   const nextField = missing[0] || '';
-  const style = QUESTION_COPY[responseStyle] ? responseStyle : 'en';
   const changedThisTurn = changes.filter((change) => change.turn === turn);
   return {
     reportType, slots, fields, missing, nextField,
-    question: nextField ? QUESTION_COPY[style][nextField] : '',
+    question: questionFor(responseStyle, reportType, nextField),
     state: missing.length ? 'collecting' : 'reviewing',
     turnCount: turn,
     changes,
@@ -163,14 +171,27 @@ const publicSessionState = (record) => {
   };
 };
 
+const readOwnedSession = async (sessionKey, userId) => {
+  const record = await AssistantSession.findOne({ sessionKey });
+  if (record?.ownerId && String(record.ownerId) !== String(userId || '')) throw ApiError.forbidden('This assistant session belongs to another account.');
+  return record;
+};
+
+const readAssistantSessionForSearch = async ({ sessionId, responseStyle, userId }) => {
+  const record = await readOwnedSession(sessionKeyFor(sessionId), userId);
+  if (!record?.reportType || !['collecting', 'reviewing'].includes(record.state)) return null;
+  const view = publicSessionState(record);
+  const required = missingFields(view.reportType, {}).length;
+  return { ...view, question: questionFor(responseStyle, view.reportType, view.nextField), changedThisTurn: [], completeness: Math.round((required - view.missing.length) / required * 100) };
+};
+
 const applyAssistantSessionTurn = async ({ sessionId, expectedVersion, message, intent, responseStyle, userId, now = new Date() }) => {
   if (!cleanText(sessionId, 160)) throw ApiError.badRequest('A conversation session ID is required.');
   const sessionKey = sessionKeyFor(sessionId);
-  let record = await AssistantSession.findOne({ sessionKey });
+  let record = await readOwnedSession(sessionKey, userId);
+  if (!record?.reportType && !['lost', 'found'].includes(intent)) return null;
   if (!record) {
     record = await AssistantSession.create({ sessionKey, ownerId: userId || null, responseStyle, expiresAt: new Date(now.getTime() + SESSION_TTL_MS) });
-  } else if (record.ownerId && String(record.ownerId) !== String(userId || '')) {
-    throw ApiError.forbidden('This assistant session belongs to another account.');
   }
   const version = Number(expectedVersion);
   if (Number.isFinite(version) && version !== record.stateVersion) throw ApiError.conflict('This conversation changed in another tab. Reload it before correcting details.');
@@ -200,4 +221,4 @@ const applyAssistantSessionTurn = async ({ sessionId, expectedVersion, message, 
   return { ...publicSessionState(updated), question: advanced.question, changedThisTurn: advanced.changedThisTurn, completeness: advanced.completeness };
 };
 
-export { SESSION_TTL_MS, advanceConversationState, applyAssistantSessionTurn, publicSessionState, sessionKeyFor };
+export { SESSION_TTL_MS, advanceConversationState, applyAssistantSessionTurn, publicSessionState, readAssistantSessionForSearch, sessionKeyFor };

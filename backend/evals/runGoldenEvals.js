@@ -63,7 +63,7 @@ const runGoldenEvals = (cases = goldenCases) => {
   }
   const passed = results.filter((result) => result.passed).length;
   return {
-    datasetVersion: 'golden-v2',
+    datasetVersion: 'golden-v3',
     total: results.length,
     passed,
     failed: results.length - passed,
