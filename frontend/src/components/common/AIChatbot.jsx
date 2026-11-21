@@ -244,11 +244,13 @@ const AIChatbot = () => {
   const [mobileViewport, setMobileViewport] = useState(null);
   const [historyReady, setHistoryReady] = useState(false);
   const [isSubmittingReport, setIsSubmittingReport] = useState(false);
+  const [isRequestingHandoff, setIsRequestingHandoff] = useState(false);
   const [speakingMessage, setSpeakingMessage] = useState(-1);
   const messageStreamRef = useRef(null);
   const dialogRef = useRef(null);
   const floatingButtonRef = useRef(null);
   const inputRef = useRef(null);
+  const activeConversationRef = useRef(conversationId);
   const recognitionRef = useRef(null);
   const utteranceRef = useRef(null);
   const voiceConsentRef = useRef(false);
@@ -259,6 +261,10 @@ const AIChatbot = () => {
     recognitionRef.current?.abort?.();
     window.speechSynthesis?.cancel?.();
   }, []);
+
+  useEffect(() => {
+    activeConversationRef.current = conversationId;
+  }, [conversationId]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !window.speechSynthesis) return undefined;
@@ -495,7 +501,7 @@ const AIChatbot = () => {
 
   const requestAssistant = async (message, { page = 1, displayUser = true } = {}) => {
     const trimmed = String(message || '').trim();
-    if (!trimmed || isLoading) return;
+    if (!trimmed || isLoading || isRequestingHandoff) return;
     const history = messages.slice(-10).map(({ role, content }) => ({ role: role === 'ai' ? 'assistant' : role, content }));
     const conversationStyle = [...messages].reverse().find((entry) => entry.responseStyle)?.responseStyle;
     if (displayUser) {
@@ -643,17 +649,25 @@ const AIChatbot = () => {
       navigate('/login');
       return;
     }
+    if (!conversationId || isRequestingHandoff) return;
     if (!window.confirm(t('assistant.handoffConsent'))) return;
+    setIsRequestingHandoff(true);
     try {
       const response = await api.post('/ai/handoff', {
         sessionId: conversationId,
         consent: true,
         reason: input.trim() || t('assistant.handoffReason'),
       });
-      setSessionVersion(response.data?.data?.stateVersion || sessionVersion);
-      toast.success(t('assistant.handoffQueued', { id: response.data?.data?.ticketId || '' }));
+      const { ticketId, stateVersion } = response.data?.data || {};
+      if (!ticketId) throw new Error('Missing helpdesk ticket ID');
+      if (activeConversationRef.current === conversationId && Number.isInteger(stateVersion)) {
+        setSessionVersion((current) => Math.max(current, stateVersion));
+      }
+      toast.success(t('assistant.handoffQueued', { id: ticketId }));
     } catch {
       toast.error(t('assistant.handoffFailed'));
+    } finally {
+      setIsRequestingHandoff(false);
     }
   };
 
@@ -1012,7 +1026,7 @@ const AIChatbot = () => {
                 </button>
                 <button
                   type="submit"
-                  disabled={!input.trim() || isLoading}
+                  disabled={!input.trim() || isLoading || isRequestingHandoff}
                   className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-r from-primary-600 to-indigo-600 text-white shadow-sm transition hover:opacity-90 hover:scale-105 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:scale-100"
                   aria-label={t('assistant.send')}
                   title="Send message"
@@ -1022,7 +1036,7 @@ const AIChatbot = () => {
               </div>
             </div>
           </div>
-          <button type="button" onClick={requestHumanHandoff} className="mt-2 inline-flex min-h-9 w-full items-center justify-center gap-2 rounded-xl border border-surface-200 text-xs font-semibold text-surface-600 hover:border-primary-300 hover:text-primary-700 dark:border-surface-700 dark:text-surface-300">
+          <button type="button" onClick={requestHumanHandoff} disabled={!historyReady || isLoading || isSubmittingReport || isRequestingHandoff} aria-busy={isRequestingHandoff} className="mt-2 inline-flex min-h-9 w-full items-center justify-center gap-2 rounded-xl border border-surface-200 text-xs font-semibold text-surface-600 hover:border-primary-300 hover:text-primary-700 disabled:opacity-50 dark:border-surface-700 dark:text-surface-300">
             <FiUsers aria-hidden="true" />{t('assistant.handoff')}
           </button>
           <p className="mt-1.5 text-center text-[10px] text-surface-400 dark:text-surface-500 font-medium">

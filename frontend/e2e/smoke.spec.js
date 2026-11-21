@@ -79,6 +79,28 @@ test.describe('Smart Lost & Found - Web App Smoke Suite', () => {
     await expect(launcher).toBeFocused();
   });
 
+  test('helpdesk can queue a request before the first chat message', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.route('**/api/auth/me', (route) => route.fulfill({
+      json: { success: true, data: { _id: '507f1f77bcf86cd799439011', fullName: 'Test User', role: 'student', isVerified: true } },
+    }));
+    await page.route('**/api/auth/csrf', (route) => route.fulfill({
+      json: { success: true, data: { csrfToken: 'test-csrf' } },
+    }));
+    await page.route('**/api/ai/handoff', (route) => route.fulfill({
+      status: 201, json: { success: true, data: { ticketId: 'test-ticket', status: 'queued', stateVersion: 1 } },
+    }));
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Open Smart L&F assistant' }).click();
+    page.once('dialog', (dialog) => dialog.accept());
+    const handoff = page.waitForRequest('**/api/ai/handoff');
+    await page.getByRole('button', { name: 'Ask authorized helpdesk' }).click();
+    expect((await handoff).postDataJSON()).toEqual({
+      sessionId: expect.any(String), consent: true, reason: 'User requested helpdesk support.',
+    });
+    await expect(page.getByText('Helpdesk request queued. Ticket test-ticket')).toBeVisible();
+  });
+
   test('a loaded listing photo is visible on the public card', async ({ page }) => {
     const item = {
       _id: '507f1f77bcf86cd799439011',
