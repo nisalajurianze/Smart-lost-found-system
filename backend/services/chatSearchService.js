@@ -141,9 +141,10 @@ export const inferIntent = (value) => {
 export const reportTypeForLookup = (value) => {
   const text = normalizeText(value);
   if (LOOKING_FOR_OWN_ITEM.test(text)) return 'found';
-  const browsing = /\b(?:show|list|browse|pennanna)\b|පෙන්වන්න|லிஸ்ட்|காட்ட/u.test(text);
+  const browsing = /^(?:(?:hi+|hello|hey) )?(?:(?:please|can you|could you) )?(?:find|show|list|browse|search for|look for)\b|\bpennanna\b|පෙන්වන්න|லிஸ்ட்|காட்ட/u.test(text);
+  if (!browsing) return null;
   const type = inferIntent(text);
-  return browsing && type !== 'search' ? type : null;
+  return type === 'search' ? 'all' : type;
 };
 
 export const isReportRequest = (value) => {

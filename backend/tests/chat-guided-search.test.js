@@ -112,3 +112,15 @@ test('browsing found reports uses the found inventory without updating a draft',
   assert.deepEqual(result.actions, []);
   assert.match(result.text, /No matching found-item report/);
 });
+
+test('a new search inside a report conversation leaves the draft alone', async (t) => {
+  t.mock.method(AssistantSession, 'findOne', () => assert.fail('Searching should not edit a report session'));
+  for (const model of [FoundItem, LostItem]) {
+    t.mock.method(model, 'find', () => ({ select() { return this; }, sort() { return this; }, limit() { return this; }, lean: async () => [] }));
+  }
+  const result = await chat({ message: 'Search for a blue wallet', locale: 'en', sessionId: 'draft-open', sessionVersion: 2 });
+  assert.equal(result.intent, 'search');
+  assert.equal(result.sessionState, null);
+  assert.equal(result.reportDraft, null);
+  assert.ok(result.query.terms.includes('wallet'));
+});

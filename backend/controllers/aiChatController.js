@@ -462,7 +462,7 @@ export const handleAIChat = asyncHandler(async (req, res) => {
     return ApiResponse.ok({ text: t(responseStyle, 'ask'), language, responseStyle, quickReplies: q(responseStyle, 'ask'), items: [] }).send(res);
   }
 
-  const inventory = lookupType || ({ lost: 'found', found: 'lost' })[intent];
+  const inventory = lookupType === 'all' ? null : lookupType || ({ lost: 'found', found: 'lost' })[intent];
   let ranked;
   if (inventory === 'found') {
     ranked = await searchModel(FoundItem, 'FoundItem', ['available', 'matched'], searchMessage, terms);
