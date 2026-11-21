@@ -3,7 +3,7 @@ import Input from './Input';
 import Textarea from './Textarea';
 import { useLanguage } from '../../i18n/LanguageContext';
 
-const ItemAttributeFields = ({ values, setters }) => {
+const ItemAttributeFields = ({ values, setters, errors }) => {
   const { t } = useLanguage();
 
   return (
@@ -13,12 +13,12 @@ const ItemAttributeFields = ({ values, setters }) => {
         <p className="mt-1 text-sm text-surface-500 dark:text-surface-400">{t('report.attributesDesc')}</p>
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
-        <Input label={t('report.brand')} name="brand" value={values.brand} onChange={(event) => setters.setBrand(event.target.value)} placeholder={t('report.brandPlaceholder')} />
-        <Input label={t('report.model')} name="model" value={values.model} onChange={(event) => setters.setModel(event.target.value)} placeholder={t('report.modelPlaceholder')} />
-        <Input label={t('report.colours')} name="colors" value={values.colors} onChange={(event) => setters.setColors(event.target.value)} placeholder={t('report.coloursPlaceholder')} helperText={t('report.coloursHelp')} />
-        <Input label={t('report.material')} name="material" value={values.material} onChange={(event) => setters.setMaterial(event.target.value)} placeholder={t('report.materialPlaceholder')} />
+        <Input label={t('report.brand')} name="brand" value={values.brand} onChange={(event) => setters.setBrand(event.target.value)} error={errors.brand} placeholder={t('report.brandPlaceholder')} />
+        <Input label={t('report.model')} name="model" value={values.model} onChange={(event) => setters.setModel(event.target.value)} error={errors.model} placeholder={t('report.modelPlaceholder')} />
+        <Input label={t('report.colours')} name="colors" value={values.colors} onChange={(event) => setters.setColors(event.target.value)} error={errors.colors} placeholder={t('report.coloursPlaceholder')} helperText={t('report.coloursHelp')} />
+        <Input label={t('report.material')} name="material" value={values.material} onChange={(event) => setters.setMaterial(event.target.value)} error={errors.material} placeholder={t('report.materialPlaceholder')} />
       </div>
-      <Textarea label={t('report.uniqueFeatures')} value={values.uniqueFeatures} onChange={(event) => setters.setUniqueFeatures(event.target.value)} placeholder={t('report.uniquePlaceholder')} helperText={t('report.uniqueHelp')} />
+      <Textarea label={t('report.uniqueFeatures')} name="uniqueFeatures" value={values.uniqueFeatures} onChange={(event) => setters.setUniqueFeatures(event.target.value)} error={errors.uniqueFeatures} placeholder={t('report.uniquePlaceholder')} helperText={t('report.uniqueHelp')} />
     </section>
   );
 };
