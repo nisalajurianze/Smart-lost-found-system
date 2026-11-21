@@ -22,7 +22,7 @@ export const ItemCard = React.memo(({ item, type = 'lost', onFeedback, view = 'g
 
   return (
     <article className={`glass-card-hover ${isLost ? 'lost-card-hover' : 'found-card-hover'} ${listMode ? 'grid grid-cols-[8rem_1fr] sm:grid-cols-[12rem_1fr]' : 'flex h-full flex-col'} overflow-hidden group`}>
-      <Link to={detailPath} className={`relative block bg-surface-100 dark:bg-surface-800 overflow-hidden focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-inset focus-visible:ring-primary-500 ${listMode ? 'min-h-40' : 'aspect-[4/3]'}`} aria-label={`${t('search.viewDetails')}: ${item.itemName}`}>
+      <Link to={detailPath} className={`relative block overflow-hidden focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-inset focus-visible:ring-primary-500 ${listMode ? 'min-h-40' : 'aspect-[4/3]'} ${mainImage ? 'bg-transparent' : 'bg-surface-100 dark:bg-surface-800'}`} aria-label={`${t('search.viewDetails')}: ${item.itemName}`}>
         {mainImage ? <img src={mainImage} alt={item.itemName} loading="lazy" className="h-full w-full object-contain transition-transform duration-300 group-hover:scale-[1.03]" /> : <div className="flex h-full min-h-40 w-full flex-col items-center justify-center bg-gradient-to-br from-primary-950/20 to-primary-950/5 px-3 text-center text-4xl text-primary-500/50"><span aria-hidden="true">{getCategoryIcon(item.category)}</span><span className="mt-2 text-xs font-semibold uppercase tracking-wider text-surface-500">{t('search.noImage')}</span></div>}
         <div className="absolute right-3 top-3"><StatusBadge status={item.status} /></div>
       </Link>
