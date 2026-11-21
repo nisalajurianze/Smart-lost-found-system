@@ -110,11 +110,12 @@ export const FoundItemDetail = () => {
 
   const hasImages = currentItem.images && currentItem.images.length > 0;
   const isFinder = (currentItem.userId?._id || currentItem.userId)?.toString() === loggedInUserId?.toString();
-  const isConnectedUser = currentItem.connectedUserId?.toString() === loggedInUserId?.toString();
+  const isConnectedUser = Boolean(loggedInUserId) && currentItem.connectedUserId?.toString() === loggedInUserId.toString();
   const isClaimable = (currentItem.status === 'available' || currentItem.status === 'matched') && !isFinder && !isConnectedUser && !hasClaimedSession && !hasExistingClaim;
   const isHandoverInProgress = currentItem.status === 'in_progress';
 
-  const canSeeContact = user?.role === 'admin' || isFinder || isConnectedUser || isContactShared;
+  const isContactPrivate = currentItem.contactVisibility === 'private';
+  const canSeeContact = user?.role === 'admin' || isFinder || (!isContactPrivate && (isConnectedUser || isContactShared));
 
 
   return (
@@ -381,6 +382,11 @@ export const FoundItemDetail = () => {
                       </div>
                     </div>
                   )}
+                </div>
+              ) : isContactPrivate && isConnectedUser ? (
+                <div className="space-y-2 text-sm text-surface-600 dark:text-surface-300">
+                  <p>{t('detail.privateContactHelp')}</p>
+                  <Link to="/contact" className="inline-flex min-h-11 items-center font-semibold text-primary-500 hover:underline">{t('common.contact')}</Link>
                 </div>
               ) : (
                 <div className="py-4 text-center space-y-4">

@@ -15,6 +15,7 @@ import { resolveItemHandover, cancelItemHandover } from '../services/itemWorkflo
 import { itemView } from '../utils/serializers.js';
 import { locationIntelligenceView, resolveLocation } from '../services/locationIntelligenceService.js';
 import { resolveOrCreateUserCategory } from '../services/categoryResolutionService.js';
+import { normalizeReportContactVisibility } from '../utils/reportContact.js';
 
 const cacheKeys = ['lostItems:*', 'cache:/api/lost-items*'];
 const parseTags = (value) => [...new Set((Array.isArray(value) ? value : String(value || '').split(','))
@@ -58,7 +59,7 @@ const createLostItem = asyncHandler(async (req, res) => {
         uniqueFeatures: parseList(req.body.uniqueFeatures, 12),
         lostDate: req.body.lostDate,
         contactPreference: req.body.contactPreference || 'both',
-        contactVisibility: 'request_only',
+        contactVisibility: normalizeReportContactVisibility(req.body.contactVisibility),
         tags: parseTags(req.body.tags),
         images,
         status: 'pending',
@@ -139,7 +140,7 @@ const updateLostItem = asyncHandler(async (req, res) => {
       if (req.body.uniqueFeatures !== undefined) current.uniqueFeatures = parseList(req.body.uniqueFeatures, 12);
       if (req.body.lostDate !== undefined) current.lostDate = new Date(req.body.lostDate);
       if (req.body.contactPreference !== undefined) current.contactPreference = req.body.contactPreference;
-      current.contactVisibility = 'request_only';
+      current.contactVisibility = normalizeReportContactVisibility(req.body.contactVisibility ?? current.contactVisibility);
       if (req.body.tags !== undefined) current.tags = parseTags(req.body.tags);
       current.images = [...imagesLeft, ...newImages];
       await current.save({ session });

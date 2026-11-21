@@ -1,3 +1,5 @@
+import { normalizeReportContactVisibility } from './reportContact.js';
+
 const id = (value) => value?._id?.toString?.() || value?.toString?.() || '';
 // Lean queries still contain BSON ObjectIds. structuredClone strips their
 // prototype/toJSON and exposes byte buffers instead of usable IDs on the wire.
@@ -18,6 +20,12 @@ export const contactUser = (user, { includeStudentId = false } = {}) => {
   if (includeStudentId) output.studentId = user.studentId || '';
   return output;
 };
+
+const reportContactUser = (user, preference) => user ? ({
+  ...minimalUser(user),
+  ...(preference !== 'phone' ? { email: user?.email || '' } : {}),
+  ...(preference !== 'email' ? { phone: user?.phone || '' } : {}),
+}) : null;
 
 const publicLocationProjection = (output) => {
   const location = output.locationIntelligence || {};
@@ -67,11 +75,10 @@ export const itemView = (item, viewer) => {
   const owner = Boolean(viewerId) && id(reporter) === viewerId;
   const connected = Boolean(viewerId) && id(output.connectedUserId) === viewerId;
   const admin = viewer?.role === 'admin';
-  // Legacy records may still contain contactVisibility="public". Never use that
-  // flag to bypass the human-approved participant/contact-sharing workflow.
-  const maySeeContact = owner || connected || admin;
+  output.contactVisibility = normalizeReportContactVisibility(output.contactVisibility);
+  const maySeeContact = owner || admin || (connected && output.contactVisibility !== 'private');
   output.userId = maySeeContact
-    ? { ...minimalUser(reporter), ...(output.contactPreference !== 'phone' ? { email: reporter?.email || '' } : {}), ...(output.contactPreference !== 'email' ? { phone: reporter?.phone || '' } : {}) }
+    ? reportContactUser(reporter, output.contactPreference)
     : minimalUser(reporter);
   if (!owner && !connected && !admin) {
     delete output.connectedUserId;
@@ -98,11 +105,27 @@ export const claimView = async (claim, viewer, privateAssetView) => {
   const reporter = item?.userId;
   const viewerId = id(viewer);
   const isAdmin = viewer?.role === 'admin';
-  const isClaimant = id(claimant) === viewerId;
-  const isReporter = id(reporter) === viewerId;
-  const contactUnlocked = isAdmin || (output.status === 'approved' && output.isContactShared === true);
-  output.claimantId = (isAdmin || isClaimant || (isReporter && contactUnlocked)) ? contactUser(claimant, { includeStudentId: isAdmin || isReporter }) : minimalUser(claimant);
-  if (item) item.userId = (isAdmin || isReporter || (isClaimant && contactUnlocked)) ? contactUser(reporter, { includeStudentId: isAdmin }) : minimalUser(reporter);
+  const isClaimant = Boolean(viewerId) && id(claimant) === viewerId;
+  const isReporter = Boolean(viewerId) && id(reporter) === viewerId;
+  const contactUnlocked = output.status === 'approved' && output.isContactShared === true;
+  const reciprocal = output.foundItemId ? output.matchId?.lostItemId : output.matchId?.foundItemId;
+  const reciprocalAllowsContact = !output.matchId || (
+    reciprocal?.userId && id(reciprocal.userId) === id(claimant) && reciprocal.contactVisibility !== 'private'
+  );
+
+  if (isAdmin || isClaimant) output.claimantId = contactUser(claimant, { includeStudentId: isAdmin });
+  else if (isReporter && contactUnlocked && reciprocalAllowsContact) {
+    output.claimantId = reciprocal ? reportContactUser(claimant, reciprocal.contactPreference) : contactUser(claimant, { includeStudentId: true });
+  } else output.claimantId = minimalUser(claimant);
+
+  if (item) {
+    item.contactVisibility = normalizeReportContactVisibility(item.contactVisibility);
+    if (isAdmin || isReporter) item.userId = contactUser(reporter, { includeStudentId: isAdmin });
+    else if (isClaimant && contactUnlocked && item.contactVisibility !== 'private') {
+      item.userId = reportContactUser(reporter, item.contactPreference);
+    } else item.userId = minimalUser(reporter);
+  }
+  if (output.matchId) output.matchId = id(output.matchId);
   if (!isAdmin) {
     if (output.riskAssessment) output.riskAssessment = { level: output.riskAssessment.level, requiresHumanReview: output.riskAssessment.requiresHumanReview, policy: 'advisory-only' };
   }

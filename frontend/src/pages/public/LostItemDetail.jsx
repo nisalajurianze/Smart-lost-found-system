@@ -106,11 +106,12 @@ export const LostItemDetail = () => {
 
   const hasImages = currentItem.images && currentItem.images.length > 0;
   const isOwner = (currentItem.userId?._id || currentItem.userId)?.toString() === loggedInUserId?.toString();
-  const isConnectedUser = currentItem.connectedUserId?.toString() === loggedInUserId?.toString();
+  const isConnectedUser = Boolean(loggedInUserId) && currentItem.connectedUserId?.toString() === loggedInUserId.toString();
   const isClaimable = (currentItem.status === 'available' || currentItem.status === 'pending' || currentItem.status === 'matched') && !isOwner && !isConnectedUser && !hasClaimedSession && !hasExistingClaim;
   const isHandoverInProgress = currentItem.status === 'in_progress';
 
-  const canSeeContact = user?.role === 'admin' || isOwner || isConnectedUser || isContactShared;
+  const isContactPrivate = currentItem.contactVisibility === 'private';
+  const canSeeContact = user?.role === 'admin' || isOwner || (!isContactPrivate && (isConnectedUser || isContactShared));
 
   return (
     <div className="flex-1 pt-4 pb-12 sm:pt-6 sm:pb-16 bg-surface-50 dark:bg-surface-900 transition-colors duration-300">
@@ -377,6 +378,11 @@ export const LostItemDetail = () => {
                       🌟 {t('detail.ownerNotice')}
                     </div>
                   )}
+                </div>
+              ) : isContactPrivate && isConnectedUser ? (
+                <div className="space-y-2 text-sm text-surface-600 dark:text-surface-300">
+                  <p>{t('detail.privateContactHelp')}</p>
+                  <Link to="/contact" className="inline-flex min-h-11 items-center font-semibold text-primary-500 hover:underline">{t('common.contact')}</Link>
                 </div>
               ) : (
                 <div className="py-4 text-center space-y-4">

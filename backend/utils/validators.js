@@ -4,6 +4,7 @@
 // ============================================
 
 import { body, param, query } from 'express-validator';
+import { reportContactVisibilityOptions } from './reportContact.js';
 
 
 const validateTags = (value) => {
@@ -16,7 +17,8 @@ const validateTags = (value) => {
 
 const contactFields = [
   body('contactPreference').optional().isIn(['email', 'phone', 'both']).withMessage('Contact preference must be email, phone, or both'),
-  body('contactVisibility').optional().equals('request_only').withMessage('Contact details require an approved workflow'),
+  body('contactVisibility').optional().isString().isIn(reportContactVisibilityOptions)
+    .withMessage('Choose sharing after an approved claim or keep contact details private'),
 ];
 
 const validateList = (value, { maxItems, maxLength, label }) => {

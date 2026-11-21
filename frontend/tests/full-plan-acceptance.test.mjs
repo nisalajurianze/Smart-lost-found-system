@@ -88,11 +88,12 @@ test('claim, match and handover paths keep evidence private until human-approved
   assert.match(controller, /Only the reporter or an administrator can share contact access/);
   assert.match(validators, /Cancellation reason is required/);
   assert.match(serializers, /Private ownership evidence/);
-  assert.match(serializers, /const maySeeContact = owner \|\| connected \|\| admin/);
+  assert.match(serializers, /const maySeeContact = owner \|\| admin \|\| \(connected && output\.contactVisibility !== 'private'\)/);
   assert.doesNotMatch(serializers, /maySeeContact[^;]*publicContact/);
   assert.match(read('frontend/src/components/common/ReportItemWizard.jsx'), /value: 'request_only'/);
+  assert.match(read('frontend/src/components/common/ReportItemWizard.jsx'), /value: 'private'/);
   assert.doesNotMatch(read('frontend/src/components/common/ReportItemWizard.jsx'), /value: 'public'/);
-  assert.match(read('frontend/src/components/common/ReportItemWizard.jsx'), /contactVisibility', CONTACT_VISIBILITY/);
+  assert.match(read('frontend/src/components/common/ReportItemWizard.jsx'), /contactVisibility', form\.contactVisibility/);
 });
 
 test('motion, accessibility and mobile keyboard collision safeguards remain explicit', () => {

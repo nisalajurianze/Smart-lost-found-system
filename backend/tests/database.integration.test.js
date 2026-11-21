@@ -3,6 +3,65 @@ import assert from 'node:assert/strict';
 
 const enabled = process.env.RUN_DB_INTEGRATION === 'true' && Boolean(process.env.MONGO_URI || process.env.MONGODB_URI);
 
+test('report settings persist and keep contact private through a matched claim', { skip: !enabled }, async () => {
+  const mongoose = (await import('mongoose')).default;
+  const User = (await import('../models/User.js')).default;
+  const LostItem = (await import('../models/LostItem.js')).default;
+  const FoundItem = (await import('../models/FoundItem.js')).default;
+  const Match = (await import('../models/Match.js')).default;
+  const Claim = (await import('../models/ClaimRequest.js')).default;
+  const { createFoundItem, updateFoundItem } = await import('../controllers/foundItemController.js');
+  const { createLostItem, updateLostItem } = await import('../controllers/lostItemController.js');
+  const { getClaimRequestById, shareClaimContact } = await import('../controllers/claimController.js');
+  const invoke = (handler, req) => new Promise((resolve, reject) => {
+    handler(req, { status: () => ({ json: ({ data }) => resolve(data) }) }, reject);
+  });
+  await mongoose.connect(process.env.MONGO_URI || process.env.MONGODB_URI, { dbName: `smart_lf_contact_${Date.now()}` });
+  try {
+    const createUser = (name, phone) => User.create({
+      fullName: `Test ${name}`, email: `${name}@example.com`, studentId: `INT-${name}`,
+      phone, password: 'StrongPassword!123', isVerified: true,
+    });
+    const lostOwner = await createUser('reporter', '0771234567');
+    const foundOwner = await createUser('claimant', '0771234568');
+    const data = { itemName: 'Red backpack', description: 'A red backpack with a black zipper.', category: 'Bags' };
+    const lost = await invoke(createLostItem, { user: lostOwner, body: {
+      ...data, lostLocation: 'SEUSL Main Library', lostDate: new Date(),
+    } });
+    const found = await invoke(createFoundItem, { user: foundOwner, body: {
+      ...data, foundLocation: 'SEUSL Main Library', foundDate: new Date(), contactVisibility: 'private',
+    } });
+    assert.equal(lost.contactVisibility, 'request_only');
+    assert.equal(found.contactVisibility, 'private');
+
+    await invoke(updateLostItem, { user: lostOwner, params: { id: lost._id }, body: { contactVisibility: 'private' } });
+    await invoke(updateFoundItem, { user: foundOwner, params: { id: found._id }, body: { contactPreference: 'phone' } });
+    assert.equal((await LostItem.findById(lost._id)).contactVisibility, 'private');
+    assert.equal((await FoundItem.findById(found._id)).contactVisibility, 'private');
+
+    const match = await Match.create({
+      lostItemId: lost._id, foundItemId: found._id, lostUserId: lostOwner._id, foundUserId: foundOwner._id,
+      status: 'confirmed', similarityScore: 95,
+    });
+    const claim = await Claim.create({
+      lostItemId: lost._id, claimantId: foundOwner._id, matchId: match._id, status: 'approved',
+      isContactShared: true, proofDescription: 'A distinctive black zipper clip.',
+    });
+    const params = { id: claim._id };
+    const reporterView = await invoke(getClaimRequestById, { params, user: lostOwner });
+    const claimantView = await invoke(getClaimRequestById, { params, user: foundOwner });
+    assert.equal(reporterView.matchId, String(match._id));
+    assert.equal(reporterView.claimantId.phone, undefined);
+    assert.equal(claimantView.lostItemId.userId.email, undefined);
+    await assert.rejects(invoke(shareClaimContact, { params, user: lostOwner }), { statusCode: 409 });
+    await Match.deleteOne({ _id: match._id });
+    assert.equal((await invoke(getClaimRequestById, { params, user: lostOwner })).claimantId.phone, undefined);
+  } finally {
+    await mongoose.connection.dropDatabase().catch(() => undefined);
+    await mongoose.disconnect();
+  }
+});
+
 test('concurrent refresh reuse revokes the complete session family', { skip: !enabled }, async () => {
   process.env.JWT_ACCESS_SECRET ||= 'integration-test-secret-that-is-longer-than-32-characters';
   process.env.NODE_ENV = 'test';

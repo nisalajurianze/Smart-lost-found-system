@@ -24,6 +24,7 @@ export const ClaimCard = ({ claim, onReview, onShareContact, onFeedback, onResol
   const itemUrl = targetId ? (claim.foundItemId ? `/found-items/${targetId}` : `/lost-items/${targetId}`) : '#';
 
   if (!targetItem) return null;
+  const isContactPrivate = targetItem.contactVisibility === 'private';
 
   return (
     <div className="card p-6 flex flex-col justify-between">
@@ -65,17 +66,22 @@ export const ClaimCard = ({ claim, onReview, onShareContact, onFeedback, onResol
             </div>
           </div>
 
-          {/* Show item owner's contact details if contact is shared or approved, or if user is admin */}
-          {(isAdmin || claim.status === 'approved' || claim.isContactShared) && itemOwner && (
+          {(isAdmin || claim.status === 'approved') && (itemOwner?.email || itemOwner?.phone) && (
             <div className="mt-2 p-3 bg-primary-50 dark:bg-primary-900/20 border border-primary-100 dark:border-primary-800 rounded-lg">
               <span className="text-[10px] font-bold text-primary-600 dark:text-primary-400 uppercase tracking-wide block mb-1">
                 {t('claimCard.posterContact')}
               </span>
               <div className="text-xs text-surface-700 dark:text-surface-300 space-y-1">
                 <p className="font-semibold flex items-center gap-1.5"><User size={12} className="text-surface-400" /> {itemOwner?.fullName || itemOwner?.name}</p>
-                <p className="flex items-center gap-1.5"><FiExternalLink className="text-[10px]" /> {itemOwner?.email}</p>
+                {itemOwner?.email && <p className="flex items-center gap-1.5"><FiExternalLink className="text-[10px]" /> {itemOwner.email}</p>}
                 {itemOwner?.phone && <p className="flex items-center gap-1.5"><FiExternalLink className="text-[10px]" /> {itemOwner?.phone}</p>}
               </div>
+            </div>
+          )}
+          {!isAdmin && !canReview && claim.status === 'approved' && isContactPrivate && (
+            <div className="text-sm text-surface-600 dark:text-surface-300">
+              <p>{t('detail.privateContactHelp')}</p>
+              <Link to="/contact" className="inline-flex min-h-11 items-center font-semibold text-primary-500 hover:underline">{t('common.contact')}</Link>
             </div>
           )}
 
@@ -141,21 +147,6 @@ export const ClaimCard = ({ claim, onReview, onShareContact, onFeedback, onResol
           >
             {t('claimCard.reject')}
           </Button>
-          {!claim.isContactShared ? (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => onShareContact && onShareContact(claim._id)}
-              disabled={isLoading}
-              className="text-primary-600 border-primary-500/30 hover:bg-primary-50 dark:hover:bg-primary-900/30"
-            >
-              {t('claimCard.shareContact')}
-            </Button>
-          ) : (
-            <div className="px-3 py-1.5 flex items-center gap-1.5 text-xs font-semibold text-primary-600 bg-primary-50 dark:bg-primary-900/20 dark:text-primary-400 rounded-lg border border-primary-100 dark:border-primary-800/50">
-              <FiCheck /> {t('claimCard.contactShared')}
-            </div>
-          )}
           <Button
             variant="success"
             size="sm"
@@ -171,6 +162,11 @@ export const ClaimCard = ({ claim, onReview, onShareContact, onFeedback, onResol
       {/* Leave Feedback Action for Approved Claims */}
       {!isAdmin && claim.status === 'approved' && (
         <div className="flex gap-2 mt-6 pt-4 border-t border-surface-100 dark:border-surface-700/50 justify-end flex-wrap">
+          {canReview && targetItem.status === 'in_progress' && !isContactPrivate && !claim.isContactShared && onShareContact && (
+            <Button variant="outline" size="sm" onClick={() => onShareContact(claim._id)} disabled={isLoading}>
+              {t('claimCard.shareContact')}
+            </Button>
+          )}
           {targetItem.status === 'in_progress' && onResolve && (
             <Button
               variant="primary"
