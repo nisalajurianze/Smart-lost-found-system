@@ -68,7 +68,7 @@ test('SMTP transport enforces authenticated TLS', () => {
 });
 
 test('security workflow pins gitleaks and grants write permission only to CodeQL', () => {
-  const workflow = fs.readFileSync(path.join(repositoryRoot, '.github/workflows/security.yml'), 'utf8');
+  const workflow = fs.readFileSync(path.join(repositoryRoot, '.github/workflows/security.yml'), 'utf8').replace(/\r\n/g, '\n');
   assert.match(workflow, /^permissions: \{\}$/m);
   assert.match(workflow, /codeql:\n\s+runs-on: ubuntu-latest\n\s+permissions:\n\s+contents: read\n\s+security-events: write/);
   assert.match(workflow, /secret-scan:\n\s+runs-on: ubuntu-latest\n\s+permissions:\n\s+contents: read/);

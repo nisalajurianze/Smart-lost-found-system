@@ -1,5 +1,6 @@
 import { cloudinary, configureCloudinary } from '../config/cloudinary.js';
 import ApiError from '../utils/apiError.js';
+import { verifyReportImages } from './imageAnalysisService.js';
 let configured = false;
 
 const initCloudinary = () => { configured = configureCloudinary(); return configured; };
@@ -34,10 +35,9 @@ const uploadReportImage = async (fileBuffer, folder) => {
     transformation: [{ width: 2000, height: 2000, crop: 'limit', quality: 90, flags: 'strip_profile' }],
   });
   try {
-    // This is an incoming transformation: Cloudinary stores the transformed
-    // pixels as the public asset. The authenticated original remains separate.
+    // The public copy is created only after the server clears the submitted image for publication.
     const publicCopy = await uploadImage(fileBuffer, `${folder}/public-safe`, {
-      transformation: [{ width: 900, height: 900, crop: 'limit', effect: 'pixelate:60', quality: 75, flags: 'strip_profile' }],
+      transformation: [{ width: 900, height: 900, crop: 'limit', quality: 75, flags: 'force_strip' }],
     });
     return {
       ...publicCopy,
@@ -83,6 +83,7 @@ const uploadMultipleImages = async (files = [], folder = 'smart-lf', options = {
 
 const uploadMultipleReportImages = async (files = [], folder = 'smart-lf') => {
   if (!files.length) return [];
+  await verifyReportImages(files);
   const uploaded = [];
   try {
     for (const file of files) uploaded.push(await uploadReportImage(file.buffer, folder));
@@ -102,4 +103,4 @@ const privateAssetView = (image) => {
   return { url, expiresInSeconds: 300 };
 };
 
-export { initCloudinary, uploadImage, uploadMultipleImages, uploadReportImage, uploadMultipleReportImages, deleteImage, deleteMultipleImages, privateAssetView };
+export { initCloudinary, uploadImage, uploadMultipleImages, uploadMultipleReportImages, deleteImage, deleteMultipleImages, privateAssetView };

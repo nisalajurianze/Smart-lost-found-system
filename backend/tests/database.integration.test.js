@@ -56,3 +56,50 @@ test('concurrent refresh reuse revokes the complete session family', { skip: !en
     await mongoose.disconnect();
   }
 });
+
+test('first-open helpdesk requests create one consented ticket per conversation', { skip: !enabled }, async () => {
+  const mongoose = (await import('mongoose')).default;
+  const AssistantSession = (await import('../models/AssistantSession.js')).default;
+  const AssistantHandoff = (await import('../models/AssistantHandoff.js')).default;
+  const { requestAssistantHandoff } = await import('../controllers/assistantHandoffController.js');
+  await mongoose.connect(process.env.MONGO_URI || process.env.MONGODB_URI, { dbName: `smart_lf_handoff_${Date.now()}` });
+
+  const owner = new mongoose.Types.ObjectId();
+  const otherAccount = new mongoose.Types.ObjectId();
+  const request = (body, _id = owner) => new Promise((resolve, reject) => {
+    const res = { status: (httpStatus) => ({ json: ({ data }) => resolve({ httpStatus, ...data }) }) };
+    requestAssistantHandoff({ user: { _id }, body }, res, reject);
+  });
+  const body = { sessionId: 'first-open-conversation', consent: true, reason: 'Need help. Call 0771234567.' };
+
+  try {
+    await Promise.all([AssistantSession.init(), AssistantHandoff.init()]);
+    await assert.rejects(request({ ...body, consent: false }), { statusCode: 400 });
+    assert.equal(await AssistantSession.countDocuments(), 0);
+
+    const [first, second] = await Promise.all([request(body), request(body)]);
+    assert.equal(first.httpStatus, 201);
+    assert.equal(first.status, 'queued');
+    assert.ok(first.ticketId);
+    assert.deepEqual(second.ticketId, first.ticketId);
+    assert.equal(first.stateVersion, 1);
+    assert.equal(second.stateVersion, 1);
+    assert.equal(await AssistantHandoff.countDocuments(), 1);
+    const ticket = await AssistantHandoff.findById(first.ticketId);
+    assert.doesNotMatch(`${ticket.reason} ${ticket.redactedSummary}`, /0771234567/);
+    assert.equal(String(ticket.requestedBy), String(owner));
+    const conversation = await AssistantSession.findById(ticket.assistantSessionId);
+    assert.equal(conversation.state, 'handoff');
+    assert.ok(conversation.expiresAt > new Date());
+    await assert.rejects(request(body, otherAccount), { statusCode: 403 });
+    assert.equal(await AssistantHandoff.countDocuments(), 1);
+
+    await AssistantHandoff.updateOne({ _id: first.ticketId }, { status: 'resolved' });
+    const followUp = await request(body);
+    assert.notDeepEqual(followUp.ticketId, first.ticketId);
+    assert.equal(followUp.stateVersion, 2);
+  } finally {
+    await mongoose.connection.dropDatabase().catch(() => undefined);
+    await mongoose.disconnect();
+  }
+});

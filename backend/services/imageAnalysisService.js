@@ -1,4 +1,5 @@
 import ImageAnalysis from '../models/ImageAnalysis.js';
+import ApiError from '../utils/apiError.js';
 import { imageRejectionReason, imageRejectionMessages } from '../utils/imageRejectionReason.js';
 import { maskSensitiveText, sanitizeRegion } from './imagePrivacyService.js';
 import {
@@ -167,7 +168,18 @@ const hasBlockedImageContent = (value) => [
   ...(Array.isArray(value?.safetyLabels) ? value.safetyLabels : []),
 ].some((entry) => blockedImageContentPattern.test(String(entry || '')));
 
-const suggestDetailsFromImage = async (imageUrl) => {
+const hasPrivacyAssessment = (value) => Array.isArray(value.privacyWarnings)
+  && Array.isArray(value.redactionRegions)
+  && Array.isArray(value.ocrRegions);
+
+const needsPublicRedaction = (value) => value.privacyWarnings.length > 0
+  || value.redactionRegions.length > 0
+  || value.ocrRegions.some((region) => {
+    const text = typeof region?.text === 'string' ? region.text.normalize('NFKC').trim() : '';
+    return region?.category !== 'item-marking' || !text || maskSensitiveText(text) !== text;
+  });
+
+const suggestDetailsFromImage = async (imageUrl, { forPublicUpload = false } = {}) => {
   if (!aiConfigured({ vision: true })) throw new Error('AI image suggestions are not configured.');
   if (!String(imageUrl).startsWith('data:image/')) throw new Error('Only uploaded image data is accepted.');
   const response = await requestAIJson([{
@@ -181,10 +193,22 @@ const suggestDetailsFromImage = async (imageUrl) => {
     ],
   }, {
     role: 'user',
-    content: 'For a rejection, also include rejectionReason using one of sexual, unsafe, nonItem, spam, quality, rejected, and short safetyLabels explaining the classification without personal data.',
-  }], { vision: true, purpose: 'report-auto-fill', validator: suggestionValidator, allowSensitiveOutput: true });
+    content: 'Include privacyWarnings, redactionRegions, and ocrRegions as arrays. Use empty arrays only after checking the entire image. Label OCR text item-marking only for a public brand, product name, or model printed on the item. Flag any other visible text, full serial, QR code, personal document, readable contact details, or face with a privacy warning and a redaction region. For a rejection, include rejectionReason using one of sexual, unsafe, nonItem, spam, quality, rejected, and short safetyLabels without personal data.',
+  }], {
+    vision: true,
+    purpose: 'report-auto-fill',
+    validator: (value) => suggestionValidator(value)
+      && (!forPublicUpload || value.moderationDecision !== 'allow' || hasPrivacyAssessment(value)),
+    allowSensitiveOutput: true,
+  });
   const result = response?.data;
   if (!result) throw new Error('AI provider returned an invalid suggestion.');
+  if (forPublicUpload && result.moderationDecision === 'allow' && needsPublicRedaction(result)) {
+    const message = 'Crop or mask the sensitive details in this photo, then upload it again.';
+    const error = ApiError.badRequest(message, [{ field: 'images', message }]);
+    error.code = 'IMAGE_PRIVACY_REVIEW';
+    throw error;
+  }
   const rejectionReason = imageRejectionReason(result);
   return {
     rejectionReason,
@@ -219,8 +243,9 @@ const verifyReportImages = async (files = []) => {
     const imageUrl = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
     let suggestion;
     try {
-      suggestion = await suggestDetailsFromImage(imageUrl);
+      suggestion = await suggestDetailsFromImage(imageUrl, { forPublicUpload: true });
     } catch (error) {
+      if (error.code === 'IMAGE_PRIVACY_REVIEW') throw error;
       if (error.code === 'IMAGE_POLICY_REFUSAL') {
         const rejection = new Error('The AI provider declined to analyze this image under its safety policy. Upload a different photo of the item.');
         rejection.code = 'IMAGE_NOT_ALLOWED';

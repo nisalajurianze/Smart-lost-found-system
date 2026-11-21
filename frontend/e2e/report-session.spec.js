@@ -24,7 +24,7 @@ const setupReport = async (page, { refreshSucceeds, providerUnavailable = false 
       requests.multipartBodies.push(request.postDataBuffer());
       if (providerUnavailable) return reply(503, {}, 'AI image suggestions are temporarily unavailable.');
       if (requests.uploads === 1) return reply(401, {}, 'Access token expired.');
-      return reply(200, { isSpam: false, itemName: 'Red striped bag', category: '', description: 'A red bag with dark stripes.', moderationDecision: 'allow', privacyWarnings: [], redactionRegions: [] });
+      return reply(200, { isSpam: false, isItemPhoto: true, itemName: 'Red striped bag', category: '', description: 'A red bag with dark stripes.', moderationDecision: 'allow', privacyWarnings: [], redactionRegions: [] });
     }
     return reply(200, []);
   });
@@ -74,7 +74,7 @@ test('failed upload session refresh returns the protected report to login', asyn
 
 test('provider outage removes the unverified image and blocks manual bypass', async ({ page }) => {
   const requests = await setupReport(page, { providerUnavailable: true });
-  await expect(page.getByText(/Photo removed because automated safety verification is unavailable/)).toBeVisible();
+  await expect(page.getByRole('button', { name: /Photo removed because automated safety verification is unavailable/ })).toBeVisible();
   await expect(page.getByText(/Preparing images/)).toHaveCount(0);
   await expect(page.locator('#ai-suggestion-title')).toHaveCount(0);
   await expect(page.locator('[aria-labelledby="image-privacy-review-title"] button')).toHaveCount(0);

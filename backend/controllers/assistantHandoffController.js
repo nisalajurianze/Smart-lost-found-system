@@ -1,7 +1,7 @@
 import AssistantHandoff from '../models/AssistantHandoff.js';
 import AssistantSession from '../models/AssistantSession.js';
 import { inspectAIInput, redactPrivateText } from '../services/aiSafetyService.js';
-import { sessionKeyFor } from '../services/conversationStateService.js';
+import { SESSION_TTL_MS, sessionKeyFor } from '../services/conversationStateService.js';
 import ApiError from '../utils/apiError.js';
 import ApiResponse from '../utils/apiResponse.js';
 import asyncHandler from '../utils/asyncHandler.js';
@@ -29,38 +29,44 @@ const redactedSessionSummary = (session, reason) => {
 
 const requestAssistantHandoff = asyncHandler(async (req, res) => {
   if (req.body?.consent !== true) throw ApiError.badRequest('Explicit consent is required before sharing a redacted assistant summary with helpdesk.');
-  const sessionId = String(req.body?.sessionId || '').trim();
+  const sessionId = typeof req.body?.sessionId === 'string' ? req.body.sessionId.trim() : '';
   if (!sessionId || sessionId.length > 160) throw ApiError.badRequest('A valid assistant session ID is required.');
   const sessionKey = sessionKeyFor(sessionId);
-  const session = await AssistantSession.findOne({ sessionKey });
-  if (!session) throw ApiError.notFound('Assistant session not found.');
-  if (session.ownerId && String(session.ownerId) !== String(req.user._id)) throw ApiError.forbidden('This assistant session belongs to another account.');
-  if (!session.ownerId) session.ownerId = req.user._id;
+  const requestedBy = req.user._id;
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + SESSION_TTL_MS);
   const inspected = inspectAIInput(req.body?.reason || 'User requested helpdesk support.', { maxLength: 500 });
-  const reason = handoffSafeText(inspected.redactedText) || 'User requested helpdesk support.';
-  let handoff = await AssistantHandoff.findOne({ sessionKey, status: { $in: ['queued', 'in-progress'] } });
-  if (!handoff) {
-    handoff = await AssistantHandoff.create({
-      sessionKey,
-      assistantSessionId: session._id,
-      requestedBy: req.user._id,
-      reason,
-      redactedSummary: redactedSessionSummary(session.toObject(), reason),
-      responseStyle: session.responseStyle,
-      safetyFlags: inspected.issues,
-      consent: true,
-    });
-  }
-  session.state = 'handoff';
-  session.stateVersion += 1;
-  session.lastActivityAt = new Date();
-  await session.save();
-  return ApiResponse.created({
-    ticketId: handoff._id,
-    status: handoff.status,
-    stateVersion: session.stateVersion,
-    policy: handoff.policy,
-  }, 'Conversation queued for authorized helpdesk review.').send(res);
+  const reason = handoffSafeText(inspected.redactedText).slice(0, 500) || 'User requested helpdesk support.';
+
+  // A support request can be the first server-side action for a conversation.
+  await AssistantSession.updateOne({ sessionKey }, {
+    $setOnInsert: { ownerId: requestedBy, createdAt: now, updatedAt: now, lastActivityAt: now, expiresAt },
+  }, { upsert: true, timestamps: false });
+
+  const ticket = await AssistantSession.db.transaction(async (transaction) => {
+    // Write the owner-checked session first so requests for the same conversation serialize.
+    const session = await AssistantSession.findOneAndUpdate({
+      sessionKey, $or: [{ ownerId: requestedBy }, { ownerId: null }],
+    }, { $set: { ownerId: requestedBy, lastActivityAt: now, expiresAt }, $inc: { __v: 1 } }, { new: true, session: transaction });
+    if (!session) throw ApiError.forbidden('This assistant session belongs to another account.');
+
+    let handoff = await AssistantHandoff.findOne({
+      sessionKey, requestedBy, status: { $in: ['queued', 'in-progress'] },
+    }).session(transaction);
+    if (!handoff) {
+      handoff = new AssistantHandoff({
+        sessionKey, assistantSessionId: session._id, requestedBy, reason,
+        redactedSummary: redactedSessionSummary(session.toObject(), reason),
+        responseStyle: session.responseStyle, safetyFlags: inspected.issues, consent: true,
+      });
+      await handoff.save({ session: transaction });
+      session.state = 'handoff';
+      session.stateVersion += 1;
+      await session.save({ session: transaction });
+    }
+    return { ticketId: handoff._id, status: handoff.status, stateVersion: session.stateVersion, policy: handoff.policy };
+  });
+  return ApiResponse.created(ticket, 'Conversation queued for authorized helpdesk review.').send(res);
 });
 
 const getOwnHandoff = asyncHandler(async (req, res) => {

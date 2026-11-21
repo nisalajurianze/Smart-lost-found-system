@@ -1,12 +1,22 @@
 import { io } from 'socket.io-client';
 import { SOCKET_URL } from '../utils/constants';
+import notificationService from './notificationService';
 
 let socket = null;
 const socketService = {
   connectSocket: () => {
     if (socket?.connected) return socket;
+    const crossOrigin = new URL(SOCKET_URL, window.location.href).origin !== window.location.origin;
     socket = io(SOCKET_URL, {
-      withCredentials: true,
+      withCredentials: !crossOrigin,
+      ...(crossOrigin && {
+        // The login cookie stays on the frontend origin. Request a new ticket for each handshake.
+        auth: async (sendAuth) => {
+          let ticket;
+          try { ticket = await notificationService.getSocketTicket(); } catch { /* unauthenticated */ }
+          sendAuth(ticket ? { ticket } : {});
+        },
+      }),
       autoConnect: true,
       // Prefer one long-lived WebSocket session so Railway does not route
       // follow-up polling requests to a worker that cannot find the sid.

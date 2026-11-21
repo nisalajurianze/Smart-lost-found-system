@@ -23,7 +23,7 @@ A match score is a deterministic/model-assisted ranking signal, not a probabilit
 Users review/ignore/edit suggestions, use manual forms/search when providers fail, correct AI details and request human review. Match decisions and corrections are stored in a pending governance queue; only administrator-approved records can enter evaluation/training datasets.
 
 ## Privacy and providers
-Sensitive visible text is masked. For newly selected public report photos, detected regions can be pixelated in the browser and the replacement file is submitted instead of the original browser file. Automated detection remains provider-dependent and requires live acceptance testing. Provider keys remain server-side. Provider use must satisfy the processor register, retention limits and no-training requirements.
+Sensitive visible text is masked. For newly selected public report photos, detected regions can be pixelated in the browser and the replacement file is submitted instead of the original browser file. The server also checks the submitted image before creating a recognizable public copy with embedded location metadata removed. Automated detection remains provider-dependent and requires live acceptance testing. Provider keys remain server-side. Provider use must satisfy the processor register, retention limits and no-training requirements.
 
 ## Monitoring
 The admin dashboard records request counts, provider success/failure, latency, fallback use and human correction queues. Material model/provider changes require evaluation, documentation and approval.

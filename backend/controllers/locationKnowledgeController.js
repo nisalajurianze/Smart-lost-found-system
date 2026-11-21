@@ -1,8 +1,9 @@
 import LocationKnowledge from '../models/LocationKnowledge.js';
+import locations from '../data/seuslLocations.js';
 import ApiError from '../utils/apiError.js';
 import ApiResponse from '../utils/apiResponse.js';
 import asyncHandler from '../utils/asyncHandler.js';
-import { publicLocationView, resolveLocation } from '../services/locationIntelligenceService.js';
+import { needsLocationClarification, normalizeLocation, publicLocationMatches, publicLocationView, resolveLocation } from '../services/locationIntelligenceService.js';
 import { ACTIVE_STATUSES, refreshApprovedLocations } from '../services/locationKnowledgeBootstrapService.js';
 
 const clean = (value, max = 180) => String(value || '').normalize('NFKC').trim().slice(0, max);
@@ -13,15 +14,7 @@ const resolveKnownLocation = asyncHandler(async (req, res) => {
   const query = clean(req.query.q, 240);
   if (!query) throw ApiError.badRequest('Provide a location description.');
   const resolved = resolveLocation(query);
-  const candidates = resolved.matches.map(({ location, score }) => ({
-    id: location.id,
-    canonicalName: location.canonicalName,
-    area: location.area,
-    verificationStatus: location.verificationStatus,
-    sensitivity: location.sensitivity,
-    confidence: Math.round(score * 100),
-  }));
-  return ApiResponse.ok({ query, best: publicLocationView(resolved), candidates, needsClarification: resolved.confidence < 65 || candidates.length > 1 && candidates[0].confidence - candidates[1].confidence < 12 }).send(res);
+  return ApiResponse.ok({ query, best: publicLocationView(resolved), candidates: publicLocationMatches(resolved), needsClarification: needsLocationClarification(resolved) }).send(res);
 });
 
 const submitLocationSuggestion = asyncHandler(async (req, res) => {
@@ -49,12 +42,34 @@ const submitLocationSuggestion = asyncHandler(async (req, res) => {
 });
 
 const listLocationKnowledge = asyncHandler(async (req, res) => {
+  const status = clean(req.query.status, 40);
+  const search = clean(req.query.search, 180);
+  const page = Number(req.query.page) || 1;
+  const limit = Number(req.query.limit) || 50;
+  const skip = (page - 1) * limit;
+
+  if (req.query.scope === 'catalog') {
+    const terms = normalizeLocation(search).split(' ').filter(Boolean);
+    const matching = locations.filter((location) => {
+      if (status && location.verificationStatus !== status) return false;
+      const searchable = normalizeLocation([
+        location.canonicalName, location.area, location.campus, location.category, location.administrativeArea,
+        ...Object.values(location.names || {}), ...(location.aliases || []),
+      ].join(' '));
+      return terms.every((term) => searchable.includes(term));
+    });
+    return ApiResponse.ok({ records: matching.slice(skip, skip + limit), pagination: { page, totalDocs: matching.length, totalPages: Math.max(1, Math.ceil(matching.length / limit)) } }).send(res);
+  }
+
   const filter = {};
-  if (req.query.status) filter.verificationStatus = clean(req.query.status, 40);
-  if (req.query.search) filter.$text = { $search: clean(req.query.search, 180) };
-  const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
-  const records = await LocationKnowledge.find(filter).populate('submittedBy reviewedBy', 'fullName email').sort({ isActive: 1, updatedAt: -1 }).limit(limit).lean();
-  return ApiResponse.ok({ records }).send(res);
+  if (status) filter.verificationStatus = status;
+  if (search) filter.$text = { $search: search };
+  const [records, totalDocs] = await Promise.all([
+    LocationKnowledge.find(filter).populate({ path: 'submittedBy reviewedBy', select: 'fullName email', options: { maxTimeMS: 5000 } })
+      .sort({ isActive: 1, updatedAt: -1, _id: -1 }).skip(skip).limit(limit).maxTimeMS(5000).lean(),
+    LocationKnowledge.countDocuments(filter).maxTimeMS(5000),
+  ]);
+  return ApiResponse.ok({ records, pagination: { page, totalDocs, totalPages: Math.max(1, Math.ceil(totalDocs / limit)) } }).send(res);
 });
 
 const reviewLocationKnowledge = asyncHandler(async (req, res) => {
