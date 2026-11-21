@@ -15,6 +15,7 @@ import { resolveItemHandover, cancelItemHandover } from '../services/itemWorkflo
 import { itemView } from '../utils/serializers.js';
 import { locationIntelligenceView, resolveLocation } from '../services/locationIntelligenceService.js';
 import { resolveOrCreateUserCategory } from '../services/categoryResolutionService.js';
+import { normalizeReportContactVisibility } from '../utils/reportContact.js';
 
 const cacheKeys = ['foundItems:*', 'cache:/api/found-items*'];
 const parseTags = (value) => [...new Set((Array.isArray(value) ? value : String(value || '').split(','))
@@ -59,7 +60,7 @@ const createFoundItem = asyncHandler(async (req, res) => {
         foundDate: req.body.foundDate,
         storedAt: req.body.storedAt || '',
         contactPreference: req.body.contactPreference || 'both',
-        contactVisibility: 'request_only',
+        contactVisibility: normalizeReportContactVisibility(req.body.contactVisibility),
         tags: parseTags(req.body.tags),
         images,
         status: 'available',
@@ -141,7 +142,7 @@ const updateFoundItem = asyncHandler(async (req, res) => {
       if (req.body.foundDate !== undefined) current.foundDate = new Date(req.body.foundDate);
       if (req.body.storedAt !== undefined) current.storedAt = req.body.storedAt;
       if (req.body.contactPreference !== undefined) current.contactPreference = req.body.contactPreference;
-      current.contactVisibility = 'request_only';
+      current.contactVisibility = normalizeReportContactVisibility(req.body.contactVisibility ?? current.contactVisibility);
       if (req.body.tags !== undefined) current.tags = parseTags(req.body.tags);
       current.images = [...imagesLeft, ...newImages];
       await current.save({ session });

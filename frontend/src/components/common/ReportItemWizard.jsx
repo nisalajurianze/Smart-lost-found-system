@@ -37,10 +37,8 @@ const emptyForm = {
   location: '', date: '', storedAt: '', contactPreference: 'both', contactVisibility: 'request_only',
 };
 
-// Contact details are shared only through the approved claim workflow. Keep
-// this value fixed even when an older local draft contains the removed public
-// visibility option.
-const CONTACT_VISIBILITY = 'request_only';
+const contactVisibilityValues = ['request_only', 'private'];
+const normalizeContactVisibility = (value) => value === 'private' ? 'private' : 'request_only';
 
 const toLocalDateTime = (value) => {
   if (!value) return '';
@@ -64,7 +62,7 @@ const itemToForm = (item, isLost) => ({
   date: toLocalDateTime(isLost ? item?.lostDate : item?.foundDate),
   storedAt: item?.storedAt || '',
   contactPreference: item?.contactPreference || 'both',
-  contactVisibility: CONTACT_VISIBILITY,
+  contactVisibility: normalizeContactVisibility(item?.contactVisibility),
 });
 
 const ReportItemWizard = ({ mode, itemId = null }) => {
@@ -158,6 +156,7 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
         const parsed = JSON.parse(raw);
         if (parsed?.form && typeof parsed.form === 'object') {
           nextForm = { ...sourceForm, ...parsed.form };
+          if (!contactVisibilityValues.includes(nextForm.contactVisibility)) nextForm.contactVisibility = sourceForm.contactVisibility;
           nextStep = Math.max(1, Math.min(4, Number(parsed.step) || 1));
           setDraftRestored(true);
         }
@@ -166,7 +165,7 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
       localStorage.removeItem(draftKey);
     }
 
-    setForm({ ...emptyForm, ...nextForm, category: String(nextForm.category || ''), contactVisibility: CONTACT_VISIBILITY });
+    setForm({ ...emptyForm, ...nextForm, category: String(nextForm.category || '') });
     setStep(nextStep);
     if (isEdit) setExistingImages(Array.isArray(currentItem.images) ? currentItem.images : []);
     setDeletedImages([]);
@@ -506,7 +505,7 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
       data.append(isLost ? 'lostDate' : 'foundDate', new Date(form.date).toISOString());
       if (!isLost) data.append('storedAt', form.storedAt.trim());
       data.append('contactPreference', form.contactPreference);
-      data.append('contactVisibility', CONTACT_VISIBILITY);
+      data.append('contactVisibility', form.contactVisibility);
       for (const field of ['tags', 'brand', 'model', 'colors', 'material', 'uniqueFeatures']) data.append(field, form[field]);
       deletedImages.forEach((url) => data.append('deletedImages', url));
       images.forEach((image) => data.append('images', image));
@@ -552,6 +551,7 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
   ];
   const visibilityOptions = [
     { value: 'request_only', label: t('report.shareApproved') },
+    { value: 'private', label: t('report.keepContactPrivate') },
   ];
 
   if (isEdit && !isInitialised && (!hasRequestedItem || itemLoading)) return <div className="py-16 text-center text-surface-600 dark:text-surface-300" role="status">{t('report.loading')}</div>;
@@ -723,7 +723,16 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
             <div><h2 id="review-step-title" className="text-xl font-bold">{t('report.reviewTitle')}</h2><p className="mt-1 text-sm text-surface-500">{t('report.reviewDesc')}</p></div>
             <div className="grid gap-5 sm:grid-cols-2">
               <Select label={t('report.contactChannel')} name="contactPreference" value={form.contactPreference || 'both'} onChange={(event) => update('contactPreference', event.target.value)} options={contactOptions} placeholder="" />
-              <Select label={t('report.contactVisibility')} name="contactVisibility" value={CONTACT_VISIBILITY} options={visibilityOptions} placeholder="" disabled />
+              <Select
+                label={t('report.contactVisibility')}
+                name="contactVisibility"
+                value={form.contactVisibility}
+                onChange={(event) => update('contactVisibility', event.target.value)}
+                options={visibilityOptions}
+                error={errors.contactVisibility}
+                helperText={form.contactVisibility === 'private' ? t('report.privateContactHelp') : ''}
+                placeholder=""
+              />
             </div>
             <div className="rounded-2xl border border-surface-200 bg-surface-50 p-4 dark:border-surface-800 dark:bg-surface-950/40">
               <h3 className="font-bold text-surface-900 dark:text-white">{t('report.preview')}</h3>

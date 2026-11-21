@@ -6,6 +6,8 @@ for (const mode of ['lost', 'found']) {
   test(`${mode} report recovers a stale public draft and shows server field errors before retry`, async ({ page }, testInfo) => {
     const user = { _id: '507f1f77bcf86cd799439011', fullName: 'Report Test', phone: '0771234567', studentId: 'TEST-01', role: 'student', isVerified: true };
     const submissions = [];
+    let savedReport;
+    const reportId = '507f1f77bcf86cd799439012';
     const pageErrors = [];
     page.on('pageerror', (error) => pageErrors.push(error.stack || error.message));
     await page.addInitScript(({ mode, userId }) => {
@@ -32,7 +34,15 @@ for (const mode of ['lost', 'found']) {
         if (submissions.length === 1) return route.fulfill({ status: 400, json: {
           success: false, message: 'Validation failed', errors: [{ field: `${mode}Date`, message: 'Please choose an earlier report date.' }],
         } });
-        return route.fulfill({ status: 201, json: { success: true, data: { _id: '507f1f77bcf86cd799439012', itemName: 'Headphones' } } });
+        savedReport = { ...submissions.at(-1), _id: reportId, images: [] };
+        return route.fulfill({ status: 201, json: { success: true, data: savedReport } });
+      }
+      if (pathname === `/api/${mode}-items/${reportId}`) {
+        if (request.method() === 'PUT') {
+          const form = await new globalThis.Response(request.postDataBuffer(), { headers: { 'content-type': request.headers()['content-type'] } }).formData();
+          savedReport = { ...savedReport, ...Object.fromEntries(form) };
+        }
+        return reply(savedReport);
       }
       if (pathname === `/api/${mode}-items`) return reply({ items: [], pagination: { page: 1, totalPages: 1, totalDocs: 0 } });
       return reply([]);
@@ -42,10 +52,12 @@ for (const mode of ['lost', 'found']) {
     await expect(page.getByRole('button', { name: 'Submit report', exact: true })).toBeVisible({ timeout: 30_000 });
     const visibility = page.locator('#contactVisibility');
     await expect(visibility).toHaveValue('request_only');
+    await expect(visibility).toBeEnabled();
     await expect(visibility.locator('option[value="public"]')).toHaveCount(0);
+    await visibility.selectOption('private');
     await page.getByRole('button', { name: 'Submit report', exact: true }).click();
     await expect(page.getByRole('alert').getByText('Please choose an earlier report date.', { exact: true })).toBeVisible();
-    expect(submissions[0].contactVisibility).toBe('request_only');
+    expect(submissions[0].contactVisibility).toBe('private');
 
     const date = page.locator('input[name="date"]');
     await expect(date).toBeVisible();
@@ -64,7 +76,18 @@ for (const mode of ['lost', 'found']) {
     await page.getByRole('button', { name: 'Submit report', exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/dashboard/my-${mode}$`));
     expect(submissions).toHaveLength(2);
-    expect(submissions[1].contactVisibility).toBe('request_only');
+    expect(submissions[1].contactVisibility).toBe('private');
+
+    await page.goto(`/dashboard/edit-${mode}/${reportId}`);
+    const next = page.getByRole('button', { name: 'Continue', exact: true });
+    await next.click();
+    await next.click();
+    await next.click();
+    await expect(visibility).toHaveValue('private');
+    await visibility.selectOption('request_only');
+    await page.getByRole('button', { name: 'Save changes', exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/dashboard/my-${mode}$`));
+    expect(savedReport.contactVisibility).toBe('request_only');
     expect(pageErrors).toEqual([]);
   });
 }

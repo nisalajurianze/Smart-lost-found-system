@@ -37,6 +37,12 @@ const populateClaim = (query) => query
   .populate('claimantId', 'fullName email phone studentId profileImage notificationPreferences')
   .populate({ path: 'foundItemId', populate: { path: 'userId', select: 'fullName email phone studentId profileImage notificationPreferences' } })
   .populate({ path: 'lostItemId', populate: { path: 'userId', select: 'fullName email phone studentId profileImage notificationPreferences' } })
+  .populate({
+    path: 'matchId',
+    select: 'lostItemId foundItemId',
+    transform: (match, originalId) => match || originalId,
+    populate: ['lostItemId', 'foundItemId'].map((path) => ({ path, select: 'userId contactVisibility contactPreference' })),
+  })
   .populate('reviewedBy', 'fullName role');
 
 const isAuthorized = (claim, user) => {
@@ -273,7 +279,9 @@ const shareClaimContact = asyncHandler(async (req, res) => {
   if (!claim) throw ApiError.notFound('Claim request not found.');
   if (claim.status !== 'approved') throw ApiError.conflict('Contact sharing is available only after the claim is approved.');
   const item = claim.foundItemId || claim.lostItemId;
+  if (!item?.userId) throw ApiError.notFound('Target item not found.');
   if (item.userId._id.toString() !== req.user._id.toString() && req.user.role !== 'admin') throw ApiError.forbidden('Only the reporter or an administrator can share contact access.');
+  if (item.contactVisibility === 'private') throw ApiError.conflict('The report keeps contact details private. Use the support contact to arrange a handover.');
   if (!claim.isContactShared) { claim.isContactShared = true; await claim.save(); }
   await runSideEffects('contact-share', [
     createNotification({ userId: claim.claimantId._id, title: 'Contact shared', message: `Contact access was granted for “${item.itemName}”.`, type: 'contact_shared', relatedItem: { itemType: 'ClaimRequest', itemId: claim._id }, dedupeKey: `contact-shared:${claim._id}` }),

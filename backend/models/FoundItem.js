@@ -163,7 +163,7 @@ const foundItemSchema = new mongoose.Schema(
     },
     contactVisibility: {
       type: String,
-      enum: ['public', 'request_only'],
+      enum: ['public', 'request_only', 'private'],
       default: 'request_only',
     },
     isDeleted: {

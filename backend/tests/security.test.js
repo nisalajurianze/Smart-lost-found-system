@@ -7,6 +7,8 @@ import { getFallbackAnalysis } from '../services/imageAnalysisService.js';
 import Notification from '../models/Notification.js';
 import ImageAnalysis from '../models/ImageAnalysis.js';
 import { publicLocationView } from '../services/locationIntelligenceService.js';
+import { validationResult } from 'express-validator';
+import { createLostItemValidator, updateLostItemValidator, createFoundItemValidator, updateFoundItemValidator } from '../utils/validators.js';
 import fs from 'node:fs';
 
 test('opaque security tokens have entropy and stable hashing', () => {
@@ -110,6 +112,57 @@ test('legacy public contact flag cannot bypass approved contact sharing', () => 
   const result = itemView(item, null);
   assert.equal(result.userId.email, undefined);
   assert.equal(result.userId.phone, undefined);
+  assert.equal(result.contactVisibility, 'request_only');
+});
+
+test('lost and found report requests accept both private settings and reject the legacy public setting', async () => {
+  for (const validators of [createLostItemValidator, updateLostItemValidator, createFoundItemValidator, updateFoundItemValidator]) {
+    for (const visibility of [undefined, 'request_only', 'private', 'public']) {
+      const req = { body: visibility === undefined ? {} : { contactVisibility: visibility } };
+      for (const validator of validators) await validator.run(req);
+      const contactError = validationResult(req).array().some((error) => error.path === 'contactVisibility');
+      assert.equal(contactError, visibility === 'public');
+    }
+  }
+});
+
+test('report contact visibility applies to the approved participant and respects the selected channel', async () => {
+  const reporter = { _id: 'owner', fullName: 'Owner', email: 'owner@example.com', phone: '+94111111111' };
+  const claimant = { _id: 'claimant', email: 'claimant@example.com', phone: '+94222222222' };
+  const report = { _id: 'item', userId: reporter, connectedUserId: claimant._id, contactPreference: 'email', contactVisibility: 'private' };
+  const claim = { claimantId: claimant, status: 'approved', isContactShared: true, foundItemId: report };
+
+  assert.equal(itemView(report, claimant).userId.email, undefined);
+  assert.equal(itemView(report, reporter).userId.email, reporter.email);
+  assert.equal((await claimView(claim, claimant)).foundItemId.userId.email, undefined);
+  assert.equal((await claimView(claim, { role: 'admin' })).foundItemId.userId.phone, reporter.phone);
+
+  report.contactVisibility = 'request_only';
+  const details = itemView(report, claimant).userId;
+  const approved = (await claimView(claim, claimant)).foundItemId.userId;
+  assert.equal(details.email, reporter.email);
+  assert.equal(details.phone, undefined);
+  assert.equal(approved.email, reporter.email);
+  assert.equal(approved.phone, undefined);
+});
+
+test('an approved matched claim respects the other report\'s privacy setting', async () => {
+  const reporter = { _id: 'owner' };
+  const claimant = { _id: 'claimant', email: 'claimant@example.com', phone: '+94222222222' };
+  const linkedReport = { userId: claimant._id, contactVisibility: 'private', contactPreference: 'phone' };
+  const claim = {
+    claimantId: claimant, status: 'approved', isContactShared: true, lostItemId: { userId: reporter },
+    matchId: { _id: 'match-id', foundItemId: linkedReport },
+  };
+  const privateResult = await claimView(claim, reporter);
+  assert.equal(privateResult.claimantId.email, undefined);
+  assert.equal(privateResult.claimantId.phone, undefined);
+  assert.equal(privateResult.matchId, 'match-id');
+  linkedReport.contactVisibility = 'request_only';
+  const sharedResult = await claimView(claim, reporter);
+  assert.equal(sharedResult.claimantId.email, undefined);
+  assert.equal(sharedResult.claimantId.phone, claimant.phone);
+  assert.equal((await claimView({ ...claim, matchId: 'match-id' }, reporter)).claimantId.phone, undefined);
 });
 
 test('claim evidence and both parties contacts stay private from outsiders', async () => {
