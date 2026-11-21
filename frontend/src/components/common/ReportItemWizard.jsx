@@ -101,13 +101,25 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
   const [isOnline, setIsOnline] = useState(() => typeof navigator === 'undefined' ? true : navigator.onLine);
   const [uploadProgress, setUploadProgress] = useState(null);
   const privacyScanId = useRef(0);
+  const assessmentRequest = useRef(null);
   const submitting = useRef(false);
   const photoWorkPending = isPreparingPhoto || isPrivacyScanning || isRedacting;
+  const navigationBusy = isLoading || photoWorkPending;
   const hasUnavailableReview = imagePrivacyReviews.some((review) => review.status === 'scan-unavailable');
   const steps = useMemo(() => stepDefinitions.map((entry) => ({ ...entry, label: t(entry.labelKey) })), [t]);
   const locale = language === 'si' ? 'si-LK' : language === 'ta' ? 'ta-LK' : 'en-US';
 
-  const update = (field, value) => setForm((current) => ({ ...current, [field]: value }));
+  const update = (field, value) => {
+    setForm((current) => ({ ...current, [field]: value }));
+    setErrors((current) => {
+      if (!Object.hasOwn(current, field)) return current;
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
+  };
+
+  useEffect(() => () => assessmentRequest.current?.abort(), []);
 
   useEffect(() => {
     if (categories.length === 0) dispatch(fetchCategories());
@@ -399,14 +411,15 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
     return next;
   };
 
-  const validateCurrentStep = () => {
-    const all = validate();
-    const relevant = Object.fromEntries(Object.entries(all).filter(([field]) => fieldStep[field] === step));
-    setErrors((current) => ({ ...current, ...relevant }));
-    return Object.keys(relevant).length === 0;
+  const cancelReportAssessment = () => {
+    assessmentRequest.current?.abort();
+    assessmentRequest.current = null;
+    setIsAssessing(false);
   };
 
   const runReportAssessment = async () => {
+    const request = new window.AbortController();
+    assessmentRequest.current = request;
     setIsAssessing(true);
     try {
       const result = await aiService.assessReportDraft({
@@ -424,26 +437,37 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
         date: form.date,
         hasImage: existingImages.length + images.length > 0,
         excludeItemId: isEdit ? itemId : undefined,
-      });
-      setReportAssessment(result);
+      }, request.signal);
+      if (!request.signal.aborted) setReportAssessment(result);
     } catch {
-      setReportAssessment(null);
-      toast(t('report.preflightUnavailable'));
+      if (!request.signal.aborted) toast(t('report.preflightUnavailable'));
     } finally {
-      setIsAssessing(false);
+      if (assessmentRequest.current === request) {
+        assessmentRequest.current = null;
+        setIsAssessing(false);
+      }
     }
   };
 
-  const goNext = async () => {
-    if (photoWorkPending || isAssessing) return;
-    if (!validateCurrentStep()) {
+  const goToStep = (target) => {
+    if (navigationBusy || target === step) return;
+    cancelReportAssessment();
+    setReportAssessment(null);
+    setStep(target);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (target === 4 && Object.keys(validate()).length === 0) void runReportAssessment();
+  };
+
+  const goNext = () => {
+    if (navigationBusy) return;
+    const relevant = Object.fromEntries(Object.entries(validate()).filter(([field]) => fieldStep[field] === step));
+    if (Object.keys(relevant).length) {
+      setErrors((current) => ({ ...current, ...relevant }));
       toast.error(t('report.fixHighlighted'));
       return;
     }
     setErrors({});
-    if (step === 3) await runReportAssessment();
-    setStep((current) => Math.min(4, current + 1));
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    goToStep(step + 1);
   };
 
   const clearDraft = () => {
@@ -455,6 +479,7 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
     privacyScanId.current += 1;
     setIsPrivacyScanning(false);
     setImagePrivacyReviews([]);
+    cancelReportAssessment();
     setReportAssessment(null);
     setErrors({});
     setStep(1);
@@ -486,6 +511,7 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
       return;
     }
     const allErrors = validate();
+    cancelReportAssessment();
     if (Object.keys(allErrors).length > 0) {
       setErrors(allErrors);
       setStep(Math.min(...Object.keys(allErrors).map((field) => fieldStep[field] || 4)));
@@ -553,6 +579,8 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
     { value: 'request_only', label: t('report.shareApproved') },
     { value: 'private', label: t('report.keepContactPrivate') },
   ];
+  const incompleteSteps = new Set([...Object.keys(validate()), ...Object.keys(errors)].map((field) => fieldStep[field]));
+  const hasPhoto = images.length > 0 || existingImages.length > 0;
 
   if (isEdit && !isInitialised && (!hasRequestedItem || itemLoading)) return <div className="py-16 text-center text-surface-600 dark:text-surface-300" role="status">{t('report.loading')}</div>;
   if (isEdit && !isInitialised && hasRequestedItem && !itemLoading && (!currentItem || currentItem._id !== itemId)) return <div className="py-16 text-center text-red-700 dark:text-red-300" role="alert">{t('report.loadFailed')}</div>;
@@ -584,7 +612,7 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
           variant="ghost"
           className="text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:text-rose-400 dark:hover:bg-rose-950/40 dark:hover:text-rose-300 font-semibold text-xs sm:text-sm"
           onClick={() => setIsClearConfirmOpen(true)}
-          disabled={isLoading || photoWorkPending || isAssessing}
+          disabled={navigationBusy}
         >
           {t('report.clearDraft')}
         </Button>
@@ -606,11 +634,10 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
       <nav aria-label={t('report.progress')} className="grid grid-cols-4 gap-1.5 sm:gap-3">
         {steps.map(({ id, label, icon: Icon }) => {
           const isCurrent = step === id;
-          const isCompleted = id < step;
-          const hasPhoto = (images && images.length > 0) || (existingImages && existingImages.length > 0);
-          const isPhotoStepWithoutImage = id === 1 && isCompleted && !hasPhoto;
+          const isCompleted = id < 4 && !incompleteSteps.has(id) && (id !== 1 || hasPhoto);
+          const isPhotoStepWithoutImage = id === 1 && !isCurrent && !hasPhoto;
 
-          let stepClass = 'border-surface-200 bg-surface-50 text-surface-400 dark:border-surface-800 dark:bg-surface-900/40';
+          let stepClass = 'border-surface-200 bg-surface-50 text-surface-700 hover:border-primary-400 dark:border-surface-800 dark:bg-surface-900/40 dark:text-surface-300';
           if (isCurrent) {
             stepClass = 'border-primary-500 bg-primary-50 text-primary-800 dark:border-primary-500 dark:bg-primary-950/30 dark:text-primary-200 shadow-xs';
           } else if (isPhotoStepWithoutImage) {
@@ -623,13 +650,13 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
             <button
               key={id}
               type="button"
-              onClick={() => id < step && setStep(id)}
-              disabled={id > step || isLoading || isAssessing}
+              onClick={() => goToStep(id)}
+              disabled={navigationBusy}
               aria-current={isCurrent ? 'step' : undefined}
-              className={`min-h-11 sm:min-h-14 rounded-xl border px-1 sm:px-3 py-2 text-center sm:text-left text-xs sm:text-sm font-semibold transition flex items-center justify-center sm:justify-start gap-1 sm:gap-2 ${stepClass}`}
+              className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl border px-1 py-2 text-center text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 disabled:opacity-60 sm:flex-row sm:justify-start sm:gap-2 sm:px-3 sm:text-left sm:text-sm ${stepClass}`}
             >
               <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
-              <span className="truncate">
+              <span className="min-w-0 break-words">
                 <span className="hidden sm:inline">{id}. </span>
                 {label}
               </span>
@@ -643,7 +670,7 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
           <h2 id="report-error-title" className="flex items-center gap-2 font-bold"><AlertCircle className="h-5 w-5" /> {t('report.fixFields')}</h2>
           <ul className="mt-2 space-y-1 text-sm">
             {Object.entries(errors).filter(([, message]) => Boolean(message)).map(([field, message]) => (
-              <li key={field}><button type="button" className="underline" onClick={() => setStep(fieldStep[field] || 4)}>{message}</button></li>
+              <li key={field}><button type="button" className="underline" onClick={() => goToStep(fieldStep[field] || 4)} disabled={navigationBusy}>{message}</button></li>
             ))}
           </ul>
         </section>
@@ -779,12 +806,12 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
         )}
 
         <div className="mt-7 flex flex-wrap items-center justify-between gap-3 border-t border-surface-200 pt-5 dark:border-surface-800">
-          <Button type="button" variant="outline" onClick={() => setStep((current) => Math.max(1, current - 1))} disabled={step === 1 || isLoading || isAssessing} icon={<ChevronLeft className="h-4 w-4" />}>{t('report.back')}</Button>
+          <Button type="button" variant="outline" onClick={() => goToStep(step - 1)} disabled={step === 1 || navigationBusy} icon={<ChevronLeft className="h-4 w-4" />}>{t('report.back')}</Button>
           {step < 4 ? (
             <Button
               type="button"
               onClick={goNext}
-              disabled={photoWorkPending || isAssessing}
+              disabled={navigationBusy}
               className={isLost ? '!bg-rose-600 hover:!bg-rose-700 !text-white' : '!bg-emerald-600 hover:!bg-emerald-700 !text-white'}
             >
               {t('report.continue')} <ChevronRight className="h-4 w-4" />

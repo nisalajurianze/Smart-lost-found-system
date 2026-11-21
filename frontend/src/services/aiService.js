@@ -19,8 +19,8 @@ const aiService = {
     return response.data.data;
   },
 
-  assessReportDraft: async (payload) => {
-    const response = await api.post('/ai/report/assess', payload);
+  assessReportDraft: async (payload, signal) => {
+    const response = await api.post('/ai/report/assess', payload, { signal });
     return response.data.data;
   }
 };

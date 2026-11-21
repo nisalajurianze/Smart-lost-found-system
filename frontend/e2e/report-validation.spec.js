@@ -50,6 +50,20 @@ for (const mode of ['lost', 'found']) {
 
     await page.goto(`/dashboard/report-${mode}`);
     await expect(page.getByRole('button', { name: 'Submit report', exact: true })).toBeVisible({ timeout: 30_000 });
+    const steps = page.getByRole('navigation', { name: 'Report progress' });
+    const detailsStep = steps.getByRole('button', { name: /Item details/ });
+    const reviewStep = steps.getByRole('button', { name: /Privacy & review/ });
+    const itemName = page.locator('input[name="itemName"]');
+    await detailsStep.click();
+    await itemName.clear();
+    await reviewStep.click();
+    await expect(reviewStep).toHaveAttribute('aria-current', 'step');
+    await page.getByRole('button', { name: 'Submit report', exact: true }).click();
+    await expect(detailsStep).toHaveAttribute('aria-current', 'step');
+    await expect(itemName).toBeVisible();
+    expect(submissions).toHaveLength(0);
+    await itemName.fill('Headphones');
+    await reviewStep.click();
     const visibility = page.locator('#contactVisibility');
     await expect(visibility).toHaveValue('request_only');
     await expect(visibility).toBeEnabled();
@@ -72,17 +86,14 @@ for (const mode of ['lost', 'found']) {
     await date.screenshot({ path: testInfo.outputPath('date-light-error.png') });
     await page.evaluate(() => document.documentElement.classList.add('dark'));
     await date.fill('2025-09-08T03:21');
-    await page.getByRole('button', { name: 'Continue', exact: true }).click();
+    await reviewStep.click();
     await page.getByRole('button', { name: 'Submit report', exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/dashboard/my-${mode}$`));
     expect(submissions).toHaveLength(2);
     expect(submissions[1].contactVisibility).toBe('private');
 
     await page.goto(`/dashboard/edit-${mode}/${reportId}`);
-    const next = page.getByRole('button', { name: 'Continue', exact: true });
-    await next.click();
-    await next.click();
-    await next.click();
+    await reviewStep.click();
     await expect(visibility).toHaveValue('private');
     await visibility.selectOption('request_only');
     await page.getByRole('button', { name: 'Save changes', exact: true }).click();
