@@ -62,6 +62,48 @@ test.describe('Smart Lost & Found - Web App Smoke Suite', () => {
     expect(hasHorizontalScrollbar).toBe(false);
   });
 
+  for (const { mode, width, theme, action } of [
+    { mode: 'found', width: 390, theme: 'dark', action: 'This is mine' },
+    { mode: 'lost', width: 320, theme: 'light', action: 'I have this' },
+  ]) {
+    test(`the mobile ${mode} claim panel is solid and leaves room for the assistant`, async ({ page }, testInfo) => {
+      const reportId = '507f1f77bcf86cd799439012';
+      const user = { _id: '507f1f77bcf86cd799439011', fullName: 'Test User', phone: '0771234567', studentId: 'SEU-TEST', role: 'student', isVerified: true };
+      const report = {
+        _id: reportId, itemName: 'Blue umbrella', category: 'Accessories', status: mode === 'found' ? 'available' : 'pending',
+        userId: { _id: '507f1f77bcf86cd799439013', fullName: 'Test Reporter' },
+        description: 'A folding blue umbrella with a silver handle.',
+        createdAt: '2026-11-21T08:00:00Z', [`${mode}Date`]: '2026-11-21T06:00:00Z', images: [],
+      };
+      await page.setViewportSize({ width, height: 744 });
+      await page.addInitScript((selectedTheme) => localStorage.setItem('smart-lf-theme-v2', selectedTheme), theme);
+      await page.route('**/api/**', (route) => {
+        const pathname = new URL(route.request().url()).pathname;
+        let data = [];
+        if (pathname === '/api/auth/me') data = user;
+        if (pathname === `/api/${mode}-items/${reportId}`) data = report;
+        if (pathname.startsWith('/api/claims/check/')) data = { hasClaim: false };
+        if (pathname.startsWith('/api/claims/questions/')) data = { questions: [] };
+        return route.fulfill({ json: { success: true, data } });
+      });
+      await page.goto(`/${mode}-items/${reportId}`);
+      const panel = page.locator('.mobile-sticky-claim');
+      const assistant = page.getByRole('button', { name: 'Open Smart L&F assistant' });
+      const claim = panel.getByRole('button', { name: action, exact: true });
+      await expect(claim).toBeInViewport();
+      await expect(panel).toHaveCSS('position', 'sticky');
+      await expect(panel).toHaveCSS('opacity', '1');
+      await expect(panel).toHaveCSS('background-color', theme === 'dark' ? 'rgb(30, 27, 75)' : 'rgb(238, 242, 255)');
+      const panelBox = await panel.boundingBox();
+      const assistantBox = await assistant.boundingBox();
+      expect(panelBox.width).toBeLessThanOrEqual(288);
+      expect(assistantBox.x - (panelBox.x + panelBox.width)).toBeGreaterThanOrEqual(10);
+      await page.screenshot({ path: testInfo.outputPath('mobile-claim-panel.png') });
+      await claim.click();
+      await expect(page.getByRole('dialog', { name: 'Secure claim • Blue umbrella' })).toBeVisible();
+    });
+  }
+
   test('the mobile assistant opens with a readable composer and waits for a tap to type', async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 660 });
     await page.goto('/');
