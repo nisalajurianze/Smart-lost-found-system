@@ -101,6 +101,57 @@ test.describe('Smart Lost & Found - Web App Smoke Suite', () => {
     await expect(page.getByText('Helpdesk request queued. Ticket test-ticket')).toBeVisible();
   });
 
+  test('simple assistant keeps search, history and guided report actions available', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const user = { _id: '507f1f77bcf86cd799439011', fullName: 'Test User', email: 'chat@example.test', studentId: 'SEU-CHAT', phone: '0771234567', role: 'student', isVerified: true };
+    const reportUrl = '/found-items/507f1f77bcf86cd799439012';
+    await page.route('**/api/**', (route) => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname;
+      let data = [];
+      if (path === '/api/auth/me') data = user;
+      if (path === '/api/auth/csrf') data = { csrfToken: 'test-csrf' };
+      if (path === '/api/ai/chat') {
+        const { message } = request.postDataJSON();
+        data = message === 'I lost an item on campus' ? {
+          text: 'Here is a possible match.', total: 1,
+          items: [{ _id: '507f1f77bcf86cd799439012', itemType: 'FoundItem', itemName: 'Blue umbrella', relevanceScore: 81, reasons: ['Similar colour'], url: reportUrl, claimUrl: reportUrl }],
+        } : {
+          text: 'Here is your report draft.', sessionState: { version: 1 },
+          reportDraft: { reportType: 'lost', state: 'collecting', version: 1, confidence: 70, fields: { itemName: 'Blue umbrella', location: 'Main Library' }, missing: ['date/time'] },
+        };
+      }
+      return route.fulfill({ json: { success: true, data } });
+    });
+
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Open Smart L&F assistant' }).click();
+    const chat = page.getByRole('dialog', { name: 'Smart L&F Assistant' });
+    await expect(chat.getByRole('button', { name: 'Found an item' })).toBeInViewport();
+    await expect(chat.getByRole('combobox', { name: 'Voice language' })).toHaveCount(0);
+    await chat.getByRole('button', { name: 'Lost something' }).click();
+    await expect(chat.getByRole('link', { name: 'View report' })).toHaveAttribute('href', reportUrl);
+    await expect(chat.getByText('Similar colour')).toBeHidden();
+    await chat.getByText('Why it appeared').click();
+    await expect(chat.getByText('Similar colour')).toBeVisible();
+
+    await chat.getByRole('button', { name: 'Chat options' }).click();
+    await chat.getByRole('combobox', { name: 'Voice language' }).selectOption('si-LK');
+    await chat.getByRole('button', { name: 'New conversation' }).click();
+    await expect(chat.getByRole('button', { name: 'Lost something' })).toBeVisible();
+    await chat.getByRole('button', { name: 'Chat options' }).click();
+    await expect(chat.getByRole('combobox', { name: 'Voice language' })).toHaveValue('si-LK');
+    await chat.getByRole('button', { name: 'Conversation history' }).click();
+    await chat.getByRole('button', { name: /^I lost an item on campus/ }).click();
+    await expect(chat.getByText('Here is a possible match.')).toBeVisible();
+
+    await chat.getByRole('textbox').fill('Draft a report for my blue umbrella');
+    await chat.getByRole('button', { name: 'Send message' }).click();
+    await chat.getByRole('button', { name: /Open guided report/ }).click();
+    await expect(page).toHaveURL(/\/dashboard\/report-lost$/);
+    await expect(chat).toHaveCount(0);
+  });
+
   test('a loaded listing photo is visible on the public card', async ({ page }) => {
     const item = {
       _id: '507f1f77bcf86cd799439011',
