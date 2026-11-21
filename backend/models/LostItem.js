@@ -13,7 +13,8 @@ const lostItemSchema = new mongoose.Schema(
       required: [true, 'User ID is required'],
       index: true,
     },
-    assistantSubmissionId: { type: mongoose.Schema.Types.ObjectId, default: null, unique: true, sparse: true },
+    // Manual reports omit this field so they do not enter the sparse unique index.
+    assistantSubmissionId: { type: mongoose.Schema.Types.ObjectId, unique: true, sparse: true },
     itemName: {
       type: String,
       required: [true, 'Item name is required'],
