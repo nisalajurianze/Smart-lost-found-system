@@ -27,6 +27,8 @@ test('show-more follow-up reuses the most recent material user query', () => {
   const resolved = resolveSearchMessage('show more', [
     { role: 'user', content: 'black Samsung phone near library' },
     { role: 'ai', content: 'Six results found' },
+    { role: 'user', content: 'hii 👋' },
+    { role: 'ai', content: 'Hi!' },
   ]);
   assert.equal(resolved, 'black Samsung phone near library');
 });
@@ -57,6 +59,7 @@ test('generic follow-ups keep Singlish until the user explicitly switches langua
     { role: 'assistant', content: 'Hari, mama reports tika balannam.' },
   ];
   assert.equal(resolveConversationStyle('hari', history), 'singlish');
+  assert.equal(resolveConversationStyle('hiii!', history), 'singlish');
   assert.equal(resolveConversationStyle('show more', history), 'singlish');
   assert.equal(resolveConversationStyle('ok', [], 'en', 'singlish'), 'singlish');
   assert.equal(resolveConversationStyle('eka iye hawasa 4ta', history, 'en', 'singlish'), 'singlish');
@@ -67,7 +70,7 @@ test('generic follow-ups keep Singlish until the user explicitly switches langua
 
 test('UI locale is used only when a generic conversation has no material history', () => {
   assert.equal(resolveConversationStyle('hi', [], 'si'), 'si');
-  assert.equal(resolveConversationStyle('hi', [], 'ta'), 'ta');
+  assert.equal(resolveConversationStyle('hii 👋', [], 'ta'), 'ta');
   assert.equal(resolveConversationStyle('find a black phone', [], 'si'), 'en');
 });
 

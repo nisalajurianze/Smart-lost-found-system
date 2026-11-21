@@ -45,6 +45,10 @@ export const normalizeText = (value) => String(value || '')
   .replace(/\s+/g, ' ')
   .trim();
 
+const GREETING_ONLY = /^(?:(?:hi+|he+y+|he+l+o+|hiya)(?: there)?|good (?:morning|afternoon|evening)|ආයුබෝවන්|හායි|හලෝ|வணக்கம்|ஹாய்|ஹலோ)$/u;
+
+export const isGreetingOnly = (value) => GREETING_ONLY.test(normalizeText(String(value || '').replace(/\p{Variation_Selector}/gu, '')));
+
 export const detectLanguage = (value) => {
   const text = String(value || '');
   const sinhala = (text.match(/\p{Script=Sinhala}/gu) || []).length;
@@ -70,7 +74,8 @@ const STRONG_SINGLISH_MARKERS = new Set([
   'thiyenawa', 'tiyenawa', 'puluwan', 'hoyanna', 'hambuna',
 ]);
 
-const GENERIC_CONVERSATION_TURN = /^(?:hi|hello|hey|ok|okay|yes|no|thanks|thank you|show more|more|same|again|continue|go on|hari|hari da|ow|owu|nae|na|එහෙනම්|හරි|ඔව්|නැහැ|තව|තවත්|வணக்கம்|சரி|ஆம்|இல்லை|மேலும்|இன்னும்)[!.?\s]*$/iu;
+const GENERIC_CONVERSATION_TURN = /^(?:ok|okay|yes|no|thanks|thank you|show more|more|same|again|continue|go on|hari|hari da|ow|owu|nae|na|එහෙනම්|හරි|ඔව්|නැහැ|තව|තවත්|சரி|ஆம்|இல்லை|மேலும்|இன்னும்)[!.?\s]*$/iu;
+const isGenericConversationTurn = (value) => isGreetingOnly(value) || GENERIC_CONVERSATION_TURN.test(value);
 
 const explicitStyleRequest = (value) => {
   const text = normalizeText(value);
@@ -98,7 +103,7 @@ export const resolveConversationStyle = (message, history = [], locale = 'en', p
   if (explicit) return explicit;
 
   const detected = detectConversationStyle(current);
-  const shouldUseHistory = !current || GENERIC_CONVERSATION_TURN.test(current);
+  const shouldUseHistory = !current || isGenericConversationTurn(current);
   if (detected !== 'en') return detected;
 
   // The client carries the established style between turns. Romanized Sinhala
@@ -115,7 +120,7 @@ export const resolveConversationStyle = (message, history = [], locale = 'en', p
     const entry = safeHistory[index];
     if (entry?.role !== 'user' || !entry.content) continue;
     const historicalStyle = detectConversationStyle(entry.content);
-    if (historicalStyle !== 'en' || !GENERIC_CONVERSATION_TURN.test(String(entry.content).trim())) return historicalStyle;
+    if (historicalStyle !== 'en' || !isGenericConversationTurn(String(entry.content).trim())) return historicalStyle;
   }
 
   return ['si', 'ta'].includes(locale) ? locale : 'en';
@@ -198,7 +203,7 @@ export const resolveSearchMessage = (message, history = []) => {
   const safeHistory = Array.isArray(history) ? history.slice(-10) : [];
   for (let index = safeHistory.length - 1; index >= 0; index -= 1) {
     const entry = safeHistory[index];
-    if (entry?.role === 'user' && entry.content && !FOLLOW_UP_ONLY.test(String(entry.content).trim())) {
+    if (entry?.role === 'user' && entry.content && !FOLLOW_UP_ONLY.test(String(entry.content).trim()) && !isGreetingOnly(entry.content)) {
       return String(entry.content).slice(0, 500);
     }
   }

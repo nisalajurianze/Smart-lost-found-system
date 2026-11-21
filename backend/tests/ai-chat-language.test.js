@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { handleAIChat, normalizeAssistantResponse, withRelevantItemEmoji } from '../controllers/aiChatController.js';
+import FoundItem from '../models/FoundItem.js';
+import LostItem from '../models/LostItem.js';
 
 const invokeChat = (body) => new Promise((resolve, reject) => {
   const response = {
@@ -42,20 +44,27 @@ test('chat fallback keeps Singlish for a generic follow-up when AI is unavailabl
   }
 });
 
-test('chat fallback gives a conversational English greeting instead of a capability dump', async () => {
-  const previous = process.env.AI_ENABLED;
-  process.env.AI_ENABLED = 'false';
-  try {
-    const response = await invokeChat({ message: 'hi', locale: 'en', history: [] });
+test('greeting variants respond directly without querying public reports or changing a report session', async (context) => {
+  for (const model of [LostItem, FoundItem]) {
+    context.mock.method(model, 'find', () => assert.fail('A greeting must not search public reports'));
+  }
+  for (const message of ['hi', 'hii', 'Hiiii!', 'hellooo', 'hey 👋🏽', 'Hello there!', 'Good morning ☀️']) {
+    const response = await invokeChat({ message, locale: 'en', history: [], sessionId: 'existing-session', sessionVersion: 2 });
     assert.equal(response.statusCode, 200);
     assert.equal(response.payload.data.responseStyle, 'en');
     assert.match(response.payload.data.text, /^Hi!/);
-    assert.doesNotMatch(response.payload.data.text, /I can search lost and found reports/);
+    assert.deepEqual(response.payload.data.items, []);
+    assert.equal(response.payload.data.query, undefined);
+    assert.equal(response.payload.data.sessionState, undefined);
     assert.equal(response.payload.data.actions[0].label, 'Report lost item');
-  } finally {
-    if (previous === undefined) delete process.env.AI_ENABLED;
-    else process.env.AI_ENABLED = previous;
   }
+});
+
+test('a greeting followed by a report request still starts the report workflow', async () => {
+  const response = await invokeChat({ message: 'Hii, I want to start a report', locale: 'en', history: [] });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.payload.data.intent, 'report');
+  assert.deepEqual(response.payload.data.actions.map(({ type }) => type), ['report_lost', 'report_found']);
 });
 
 test('Tamil greeting keeps response, quick replies, and actions in Tamil', async () => {

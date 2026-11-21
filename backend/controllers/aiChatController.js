@@ -8,6 +8,7 @@ import asyncHandler from '../utils/asyncHandler.js';
 import {
   expandKeywords,
   inferIntent,
+  isGreetingOnly,
   isPersonalQuery,
   resolveConversationLanguage,
   resolveConversationStyle,
@@ -309,14 +310,12 @@ export const handleAIChat = asyncHandler(async (req, res) => {
   const incoming = inspectedInput.redactedText;
 
   const language = resolveConversationLanguage(incoming, history);
-  const greetingOnly = /^(hi|hello|hey|ආයුබෝවන්|வணக்கம்)[!.\s]*$/iu.test(incoming);
-  if (greetingOnly) {
-    const aiGreeting = await generateAssistantResponse(incoming, history, [], null, responseStyle);
+  if (isGreetingOnly(incoming)) {
     return ApiResponse.ok({
-      text: aiGreeting?.reply || t(responseStyle, 'greeting'),
+      text: t(responseStyle, 'greeting'),
       language,
       responseStyle,
-      quickReplies: aiGreeting?.quickReplies?.length ? aiGreeting.quickReplies : q(responseStyle, 'greeting'),
+      quickReplies: q(responseStyle, 'greeting'),
       items: [],
       actions: [{ type: 'report_lost', label: actionLabel(responseStyle, 'reportLost'), url: '/dashboard/report-lost' }, { type: 'report_found', label: actionLabel(responseStyle, 'reportFound'), url: '/dashboard/report-found' }],
     }).send(res);
