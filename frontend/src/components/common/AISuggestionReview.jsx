@@ -48,6 +48,8 @@ const AISuggestionReview = ({ suggestion, onApplyField, onApplyAll, onDismiss })
         </div>
       )}
 
+      <Button type="button" onClick={onApplyAll} className="mt-4 min-h-11">{t('report.applyAll')}</Button>
+
       <div className="mt-4 space-y-2">
         {fields.map(({ key, label, value }) => {
           const confidence = Number(suggestion.fieldConfidence?.[key] || 0);
@@ -64,12 +66,9 @@ const AISuggestionReview = ({ suggestion, onApplyField, onApplyAll, onDismiss })
         })}
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-        <p className="flex items-center gap-2 text-xs text-surface-500 dark:text-surface-400">
-          <CheckCircle2 className="h-4 w-4" aria-hidden="true" /> {t('report.aiAdvisory')}
-        </p>
-        <Button type="button" onClick={onApplyAll} className="min-h-11">{t('report.applyAll')}</Button>
-      </div>
+      <p className="mt-4 flex items-center gap-2 text-xs text-surface-500 dark:text-surface-400">
+        <CheckCircle2 className="h-4 w-4" aria-hidden="true" /> {t('report.aiAdvisory')}
+      </p>
     </section>
   );
 };

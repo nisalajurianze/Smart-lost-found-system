@@ -124,9 +124,15 @@ for (const mode of ['lost', 'found']) {
     await expect(page.locator('#ai-suggestion-title')).toBeVisible();
     const image = page.getByRole('img', { name: /Preview 1/i });
     await expect.poll(() => image.evaluate((element) => element.naturalWidth)).toBeGreaterThan(0);
+    const suggestions = page.getByRole('region', { name: 'Review AI suggestions' });
+    const applyAll = suggestions.getByRole('button', { name: 'Apply all suggestions' });
+    const bulkAction = await applyAll.boundingBox();
+    const firstSuggestion = await suggestions.getByText('Red striped bag', { exact: true }).boundingBox();
+    expect(bulkAction.y + bulkAction.height).toBeLessThan(firstSuggestion.y);
+    await applyAll.click();
     await continueButton.click();
-    await page.locator('input[name="itemName"]').fill('Red striped bag');
-    await page.locator('textarea[name="description"]').fill('A red bag with dark stripes.');
+    await expect(page.locator('input[name="itemName"]')).toHaveValue('Red striped bag');
+    await expect(page.locator('textarea[name="description"]')).toHaveValue('A red bag with dark stripes.');
     await expect(page.locator('input[name="category"]')).toHaveValue('Bags');
     await page.locator('#category').fill('Sports bags');
     await continueButton.click();
