@@ -62,6 +62,28 @@ test.describe('Smart Lost & Found - Web App Smoke Suite', () => {
     expect(hasHorizontalScrollbar).toBe(false);
   });
 
+  test('a loaded listing photo is visible on the public card', async ({ page }) => {
+    const item = {
+      _id: '507f1f77bcf86cd799439011',
+      itemName: 'Preview mouse',
+      description: 'A black wired mouse for the listing preview check.',
+      category: 'Electronics',
+      status: 'pending',
+      lostLocation: 'Main Library',
+      lostDate: '2026-05-01T10:00:00.000Z',
+      images: [{ url: '/logo.png' }],
+    };
+    await page.route(/\/api\/lost-items(?:\?|$)/, (route) => route.fulfill({
+      json: { success: true, data: { items: [item], pagination: { page: 1, totalPages: 1 } } },
+    }));
+
+    await page.goto('/lost-items');
+    const photo = page.getByRole('img', { name: item.itemName });
+    await photo.scrollIntoViewIfNeeded();
+    await expect.poll(() => photo.evaluate(image => image.naturalWidth)).toBeGreaterThan(0);
+    await expect(photo).toHaveCSS('opacity', '1');
+  });
+
   test('7. End-to-end Login, Session Validation, Dashboard & Logout flow', async ({ page }) => {
     const testEmail = process.env.E2E_ADMIN_EMAIL || process.env.ADMIN_EMAIL || 'ci-admin@example.com';
     const testPassword = process.env.E2E_ADMIN_PASSWORD || process.env.ADMIN_PASSWORD;
