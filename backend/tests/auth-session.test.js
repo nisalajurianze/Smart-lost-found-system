@@ -90,3 +90,76 @@ test('Socket.IO accepts only exact configured origins and revalidates sessions',
   assert.match(socket, /disconnectSessionSockets/);
   assert.match(socket, /disconnectUserSockets/);
 });
+
+test('socket tickets are scoped to an origin, expire quickly, and cannot authorize API requests', async () => {
+  const { issueSocketTicket, verifySocketTicket } = await import('../utils/socketTicket.js');
+  const { verifyAccessSession } = await import('../middlewares/authMiddleware.js');
+  const origin = 'https://lost.example.edu';
+  const userId = '507f1f77bcf86cd799439011';
+  const ticket = issueSocketTicket(userId, 'family-123', origin);
+  const claims = verifySocketTicket(ticket, origin);
+  assert.equal(claims.sub, userId);
+  assert.equal(claims.sid, 'family-123');
+  assert.equal(claims.exp - claims.iat, 30);
+  assert.throws(() => verifySocketTicket(ticket, 'https://admin.example.edu'), /audience invalid/);
+  await assert.rejects(() => verifyAccessSession(ticket), /issuer invalid/);
+});
+
+test('a cross-origin socket receives user notifications only while its session is active', async (t) => {
+  const { createServer } = await import('node:http');
+  const { closeSocket, initSocket } = await import('../config/socket.js');
+  const { issueSocketTicket } = await import('../utils/socketTicket.js');
+  const { default: User } = await import('../models/User.js');
+  const { default: RefreshSession } = await import('../models/RefreshSession.js');
+  const origin = 'https://lost.example.edu';
+  const userId = '507f1f77bcf86cd799439011';
+  const familyId = 'family-123';
+  let active = true;
+
+  t.mock.method(User, 'findById', async (id) => {
+    assert.equal(id, userId);
+    return { _id: userId, role: 'user', isActive: true };
+  });
+  t.mock.method(RefreshSession, 'exists', async (filter) => {
+    assert.equal(filter.familyId, familyId);
+    assert.equal(filter.revokedAt, null);
+    return active ? { _id: userId } : null;
+  });
+
+  const server = createServer();
+  const io = await initSocket(server);
+  t.after(() => closeSocket());
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const endpoint = 'http://127.0.0.1:' + server.address().port + '/socket.io/?EIO=4&transport=polling';
+  const poll = (url, options) => fetch(url, {
+    signal: AbortSignal.timeout(4000),
+    ...options,
+    headers: { Origin: origin, ...options?.headers },
+  });
+
+  const handshake = async (ticket) => {
+    const response = await poll(endpoint);
+    assert.equal(response.status, 200);
+    const initial = await response.text();
+    assert.match(initial, /^0\{/);
+    const url = endpoint + '&sid=' + encodeURIComponent(JSON.parse(initial.slice(1)).sid);
+    const connect = await poll(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+      body: '40' + JSON.stringify({ ticket }),
+    });
+    assert.equal(connect.status, 200);
+    await connect.text();
+    return url;
+  };
+
+  const ticket = issueSocketTicket(userId, familyId, origin);
+  const authenticated = await handshake(ticket);
+  assert.match(await (await poll(authenticated)).text(), /^40\{/);
+  io.to('user:' + userId).emit('notification', { title: 'Test notification' });
+  assert.equal(await (await poll(authenticated)).text(), '42["notification",{"title":"Test notification"}]');
+
+  active = false;
+  const revoked = await handshake(ticket);
+  assert.match(await (await poll(revoked)).text(), /^44.*Invalid session/);
+});

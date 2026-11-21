@@ -45,11 +45,10 @@ test.describe('Smart Lost & Found - Web App Smoke Suite', () => {
   });
 
   test('5. Socket.IO polling endpoint does not return SPA index.html', async ({ request }) => {
-    const response = await request.get('/socket.io/?EIO=4&transport=polling');
-    // Socket.io polling should return 200 or 400 with engine.io packet, never <!DOCTYPE html>
-    const text = await response.text();
-    expect(text).not.toContain('<!DOCTYPE html>');
-    expect(text).not.toContain('<div id="root">');
+    const origin = new URL(test.info().project.use.baseURL).origin;
+    const response = await request.get('/socket.io/?EIO=4&transport=polling', { headers: { Origin: origin } });
+    expect(response.status()).toBe(200);
+    expect(await response.text()).toMatch(/^0\{/);
   });
 
   test('6. Mobile viewport renders without horizontal overflow', async ({ page }) => {
@@ -63,7 +62,7 @@ test.describe('Smart Lost & Found - Web App Smoke Suite', () => {
     expect(hasHorizontalScrollbar).toBe(false);
   });
 
-  test('7. End-to-end Login, Session Validation, Dashboard & Logout flow', async ({ page, request }) => {
+  test('7. End-to-end Login, Session Validation, Dashboard & Logout flow', async ({ page }) => {
     const testEmail = process.env.E2E_ADMIN_EMAIL || process.env.ADMIN_EMAIL || 'ci-admin@example.com';
     const testPassword = process.env.E2E_ADMIN_PASSWORD || process.env.ADMIN_PASSWORD;
 
@@ -71,7 +70,7 @@ test.describe('Smart Lost & Found - Web App Smoke Suite', () => {
     test.skip(!testPassword, 'Skipping auth execution: set E2E_ADMIN_PASSWORD to run full login test');
 
     // 1. Obtain CSRF token
-    const csrfRes = await request.get('/api/auth/csrf');
+    const csrfRes = await page.request.get('/api/auth/csrf');
     expect(csrfRes.status()).toBe(200);
 
     // 2. Perform UI Login
@@ -85,7 +84,7 @@ test.describe('Smart Lost & Found - Web App Smoke Suite', () => {
     expect(page.url()).toContain('/dashboard');
 
     // 4. Validate /api/auth/me succeeds with cookie authentication
-    const meRes = await request.get('/api/auth/me');
+    const meRes = await page.request.get('/api/auth/me');
     expect(meRes.status()).toBe(200);
     const meJson = await meRes.json();
     expect(meJson.success).toBe(true);

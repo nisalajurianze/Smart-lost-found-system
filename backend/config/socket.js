@@ -4,6 +4,7 @@ import cookie from 'cookie';
 import { getRedisClient, isRedisConnected } from './redis.js';
 import { clientOrigins } from './security.js';
 import { verifyAccessSession, verifySessionFamily } from '../middlewares/authMiddleware.js';
+import { verifySocketTicket } from '../utils/socketTicket.js';
 
 let io;
 let subClient;
@@ -14,8 +15,15 @@ export const isAllowedSocketOrigin = (origin) => Boolean(origin) && clientOrigin
 
 const authenticateSocket = async (socket) => {
   const cookies = cookie.parse(socket.request.headers.cookie || '');
-  if (!cookies.accessToken) throw new Error('Authentication required');
-  const authenticated = await verifyAccessSession(cookies.accessToken);
+  const ticket = socket.handshake.auth?.ticket;
+  let authenticated;
+  if (ticket !== undefined) {
+    const { sub, sid } = verifySocketTicket(ticket, normalizeOrigin(socket.request.headers.origin));
+    authenticated = await verifySessionFamily(sub, sid);
+  } else {
+    if (!cookies.accessToken) throw new Error('Authentication required');
+    authenticated = await verifyAccessSession(cookies.accessToken);
+  }
   return {
     id: authenticated.user._id.toString(),
     role: authenticated.user.role,

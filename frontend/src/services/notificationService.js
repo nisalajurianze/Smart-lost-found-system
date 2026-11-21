@@ -6,6 +6,11 @@
 import api from './api';
 
 const notificationService = {
+  getSocketTicket: async () => {
+    const res = await api.post('/notifications/socket-ticket');
+    return res.data.data.ticket;
+  },
+
   /**
    * Get all notifications for user.
    */
