@@ -8,7 +8,7 @@ import ApiError from '../utils/apiError.js';
 import ApiResponse from '../utils/apiResponse.js';
 import { suggestDetailsFromImage } from '../services/imageAnalysisService.js';
 import { getAiProviderStatus } from '../services/aiProviderService.js';
-import { publicLocationView, resolveLocation } from '../services/locationIntelligenceService.js';
+import { needsLocationClarification, publicLocationMatches, publicLocationView, resolveLocation } from '../services/locationIntelligenceService.js';
 import { assessReport } from '../services/reportIntelligenceService.js';
 import { runGoldenEvals } from '../evals/runGoldenEvals.js';
 import { issueReportConfirmation, submitApprovedAssistantReport } from '../services/assistantReportSubmissionService.js';
@@ -41,19 +41,12 @@ export const resolveLocationSuggestion = asyncHandler(async (req, res) => {
   const query = String(req.body?.query || '').normalize('NFKC').trim();
   if (query.length < 2 || query.length > 300) throw ApiError.badRequest('Location query must be between 2 and 300 characters.');
   const resolved = resolveLocation(query);
-  const suggestions = resolved.matches.map(({ location, score }) => ({
-    id: location.id,
-    canonicalName: location.canonicalName,
-    area: location.area,
-    verificationStatus: location.verificationStatus,
-    sensitivity: location.sensitivity,
-    confidence: Math.round(score * 100),
-  }));
+  const suggestions = publicLocationMatches(resolved).filter(({ precision }) => precision === 'exact-public');
   return ApiResponse.ok({
     query,
     best: publicLocationView(resolved),
     suggestions,
-    needsClarification: !resolved.best || resolved.confidence < 65,
+    needsClarification: needsLocationClarification(resolved),
     privacyNotice: 'Private residences and restricted places are returned only as approximate zones.',
   }, 'Location interpretation completed.').send(res);
 });

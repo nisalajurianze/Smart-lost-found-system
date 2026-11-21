@@ -52,8 +52,8 @@ const LocationAssistant = ({ label, name, value, onChange, error, required = fal
             <div className="flex items-start gap-2">
               {result.needsClarification ? <ShieldAlert className="mt-0.5 h-4 w-4 text-amber-600" aria-hidden="true" /> : <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" aria-hidden="true" />}
               <div>
-                <strong>{result.best.canonicalName}</strong> · {t('report.locationConfidence', { confidence: result.best.confidence })}
-                <span className="block">{result.best.verificationStatus.replaceAll('-', ' ')} · {result.best.area}</span>
+                <strong>{result.best.canonicalName || result.best.area}</strong> · {t('report.locationConfidence', { confidence: result.best.confidence })}
+                <span className="block">{result.best.verificationStatus.replaceAll('-', ' ')}{result.best.canonicalName ? ` · ${result.best.area}` : ''}</span>
               </div>
             </div>
           </div>

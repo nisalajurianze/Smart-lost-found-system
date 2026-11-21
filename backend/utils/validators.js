@@ -633,8 +633,10 @@ const locationSuggestionValidator = [
 ];
 
 const locationListQueryValidator = [
+  query('scope').optional().isIn(['catalog', 'community']).withMessage('Invalid location scope'),
   query('status').optional({ checkFalsy: true }).isIn(locationStatuses).withMessage('Invalid location status'),
   query('search').optional({ checkFalsy: true }).isString().trim().isLength({ max: 180 }).withMessage('Search is too long'),
+  query('page').optional().isInt({ min: 1, max: 10000 }).withMessage('Page must be between 1 and 10000'),
   query('limit').optional({ checkFalsy: true }).isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
 ];
 
