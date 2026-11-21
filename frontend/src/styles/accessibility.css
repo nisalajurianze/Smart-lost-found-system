@@ -120,7 +120,15 @@ html.a11y-reduce-motion *::after {
     position: sticky;
     bottom: calc(var(--mobile-bottom-nav-height) + 0.5rem);
     z-index: 30;
+    max-width: 30rem;
     box-shadow: 0 14px 35px rgba(15, 23, 42, 0.18);
+  }
+}
+
+@media (max-width: 639px) {
+  .mobile-sticky-claim {
+    /* Reserve room for the floating assistant button and a gap beside it. */
+    max-width: min(18rem, calc(100% - 4rem));
   }
 }
 

@@ -201,7 +201,7 @@ export const LostItemDetail = () => {
             </div>
 
             {/* Resolution Actions */}
-            <div className="mobile-sticky-claim p-4 rounded-xl border bg-primary-500/5 dark:bg-primary-500/10 border-primary-500/20 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="mobile-sticky-claim flex flex-col justify-between gap-3 rounded-xl border border-primary-500/20 bg-primary-50 p-3 dark:bg-primary-950 sm:flex-row sm:items-center sm:gap-4 sm:p-4">
               <div className="space-y-0.5">
                 <p className="text-sm font-extrabold text-surface-900 dark:text-white">
                   {isHandoverInProgress ? t('detail.handoverProgress') : t('detail.haveItem')}
