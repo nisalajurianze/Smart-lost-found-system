@@ -15,17 +15,30 @@ export const reportFieldSteps = {
   contactPreference: 4, contactVisibility: 4, submit: 4,
 };
 
-const aliases = { lostDate: 'date', foundDate: 'date', lostLocation: 'location', foundLocation: 'location' };
+const aliases = { lostDate: 'date', foundDate: 'date', lostLocation: 'location', foundLocation: 'location', deletedImages: 'images' };
+const assistantSubmissionConflict = /^Duplicate value for field:\s*assistantSubmissionId\b/i;
+const uploadMessage = /^(?:File is too large\.|Too many files uploaded\.|Maximum 5 images allowed\.|Invalid file type:|Invalid or empty file uploaded\.|File content does not match extension\/mimetype)/;
 
 export const reportErrorsForForm = (error, fallbackMessage) => {
   const fields = {};
   for (const entry of Array.isArray(error?.errors) ? error.errors : []) {
     const rawField = typeof entry?.field === 'string' ? entry.field : '';
+    if (rawField === 'assistantSubmissionId') {
+      fields.submit ||= fallbackMessage;
+      continue;
+    }
     const field = Object.hasOwn(aliases, rawField) ? aliases[rawField] : rawField;
     const target = Object.hasOwn(reportFieldSteps, field) ? field : 'submit';
     const message = typeof entry === 'string' ? entry : entry?.message;
     if (typeof message === 'string' && message.trim()) fields[target] ||= message;
   }
-  if (!Object.keys(fields).length) fields.submit = (typeof error === 'string' ? error : error?.message) || fallbackMessage;
+  if (!Object.keys(fields).length) {
+    const message = (typeof error === 'string' ? error : error?.message) || fallbackMessage;
+    if (error?.statusCode === 413 || (error?.statusCode === 400 && uploadMessage.test(message))) {
+      fields.images = message;
+    } else {
+      fields.submit = assistantSubmissionConflict.test(message) ? fallbackMessage : message;
+    }
+  }
   return fields;
 };

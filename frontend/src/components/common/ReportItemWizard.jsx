@@ -85,6 +85,7 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
   const [deletedImages, setDeletedImages] = useState([]);
   const [step, setStep] = useState(1);
   const [errors, setErrors] = useState({});
+  const [errorField, setErrorField] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [aiSuggestion, setAISuggestion] = useState(null);
   const [draftRestored, setDraftRestored] = useState(false);
@@ -100,6 +101,7 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
   const [imagePrivacyReviews, setImagePrivacyReviews] = useState([]);
   const [isOnline, setIsOnline] = useState(() => typeof navigator === 'undefined' ? true : navigator.onLine);
   const [uploadProgress, setUploadProgress] = useState(null);
+  const reportForm = useRef(null);
   const privacyScanId = useRef(0);
   const assessmentRequest = useRef(null);
   const submitting = useRef(false);
@@ -120,6 +122,19 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
   };
 
   useEffect(() => () => assessmentRequest.current?.abort(), []);
+
+  useEffect(() => {
+    if (!errorField || fieldStep[errorField] !== step) return;
+    const formElement = reportForm.current;
+    const targetId = errorField === 'images' ? 'report-image-upload' : errorField === 'submit' ? 'report-submit' : errorField;
+    const photoCorrection = errorField === 'images' ? formElement?.querySelector('[data-report-photo-correction]:not(:disabled)') : null;
+    const target = photoCorrection
+      || formElement?.querySelector(`#${targetId}:not(:disabled)`)
+      || formElement?.querySelector('[data-report-step]');
+    target?.focus({ preventScroll: true });
+    target?.scrollIntoView({ block: 'center' });
+    setErrorField(null);
+  }, [errorField, step]);
 
   useEffect(() => {
     if (categories.length === 0) dispatch(fetchCategories());
@@ -449,13 +464,17 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
     }
   };
 
-  const goToStep = (target) => {
-    if (navigationBusy || target === step) return;
+  const goToStep = (target, fieldToFocus = null) => {
+    if (navigationBusy) return;
+    if (fieldToFocus) setErrorField(fieldToFocus);
+    if (target === step) return;
     cancelReportAssessment();
     setReportAssessment(null);
     setStep(target);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-    if (target === 4 && Object.keys(validate()).length === 0) void runReportAssessment();
+    if (!fieldToFocus) {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      if (target === 4 && Object.keys(validate()).length === 0) void runReportAssessment();
+    }
   };
 
   const goNext = () => {
@@ -581,6 +600,8 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
   ];
   const incompleteSteps = new Set([...Object.keys(validate()), ...Object.keys(errors)].map((field) => fieldStep[field]));
   const hasPhoto = images.length > 0 || existingImages.length > 0;
+  const errorEntries = Object.entries(errors).filter(([, message]) => Boolean(message));
+  const firstErrorField = errorEntries.find(([field]) => field !== 'submit')?.[0] || 'submit';
 
   if (isEdit && !isInitialised && (!hasRequestedItem || itemLoading)) return <div className="py-16 text-center text-surface-600 dark:text-surface-300" role="status">{t('report.loading')}</div>;
   if (isEdit && !isInitialised && hasRequestedItem && !itemLoading && (!currentItem || currentItem._id !== itemId)) return <div className="py-16 text-center text-red-700 dark:text-red-300" role="alert">{t('report.loadFailed')}</div>;
@@ -665,20 +686,39 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
         })}
       </nav>
 
-      {Object.values(errors).some(Boolean) && (
-        <section className="rounded-xl border border-red-300 bg-red-50 p-4 text-red-900 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-100" role="alert" aria-labelledby="report-error-title">
-          <h2 id="report-error-title" className="flex items-center gap-2 font-bold"><AlertCircle className="h-5 w-5" /> {t('report.fixFields')}</h2>
-          <ul className="mt-2 space-y-1 text-sm">
-            {Object.entries(errors).filter(([, message]) => Boolean(message)).map(([field, message]) => (
-              <li key={field}><button type="button" className="underline" onClick={() => goToStep(fieldStep[field] || 4)} disabled={navigationBusy}>{message}</button></li>
+      {errorEntries.length > 0 && (
+        <section className="relative rounded-xl border border-red-300 bg-red-50 px-4 pb-3 pt-1 text-red-900 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-100" role="alert" aria-labelledby="report-error-title">
+          <h2 id="report-error-title" className="font-bold">
+            <button
+              type="button"
+              className="flex min-h-11 w-full items-center gap-2 text-left after:absolute after:inset-0 after:rounded-xl focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-red-500"
+              onClick={() => goToStep(fieldStep[firstErrorField], firstErrorField)}
+              disabled={navigationBusy}
+            >
+              <AlertCircle className="h-5 w-5 shrink-0" aria-hidden="true" />
+              {t(firstErrorField === 'submit' ? 'report.submissionIssue' : 'report.fixFields')}
+            </button>
+          </h2>
+          <ul className="space-y-1 text-sm">
+            {errorEntries.map(([field, message]) => (
+              <li key={field}>
+                <button
+                  type="button"
+                  className="relative z-10 flex min-h-11 w-full items-center justify-between gap-2 rounded-lg text-left underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
+                  onClick={() => goToStep(fieldStep[field], field)}
+                  disabled={navigationBusy}
+                >
+                  {message} <ChevronRight className="h-4 w-4 shrink-0" aria-hidden="true" />
+                </button>
+              </li>
             ))}
           </ul>
         </section>
       )}
 
-      <form onSubmit={handleSubmit} className={`rounded-2xl border border-surface-200 bg-white p-4 shadow-lg dark:border-surface-800 dark:bg-surface-900 sm:p-7 border-t-4 ${isLost ? '!border-t-rose-500' : '!border-t-emerald-500'}`}>
+      <form ref={reportForm} onSubmit={handleSubmit} className={`rounded-2xl border border-surface-200 bg-white p-4 shadow-lg dark:border-surface-800 dark:bg-surface-900 sm:p-7 border-t-4 ${isLost ? '!border-t-rose-500' : '!border-t-emerald-500'}`}>
         {step === 1 && (
-          <section className="space-y-5" aria-labelledby="photo-step-title">
+          <section data-report-step tabIndex={-1} className="space-y-5" aria-labelledby="photo-step-title">
             <div><h2 id="photo-step-title" className="text-xl font-bold">{t('report.photoTitle')}</h2><p className="mt-1 text-sm text-surface-500">{t('report.photoDesc')}</p></div>
             {existingImages.length > 0 && (
               <div>
@@ -695,9 +735,11 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
                 </div>
               </div>
             )}
-            <ImageUpload images={images} onChange={handleImageChange} onPreparingChange={setIsPreparingPhoto} disabled={isPrivacyScanning || isRedacting} maxFiles={Math.max(0, 5 - existingImages.length)} />
+            <div id="report-image-upload" tabIndex={-1} className="rounded-xl focus:ring-2 focus:ring-red-500">
+              <ImageUpload images={images} onChange={handleImageChange} onPreparingChange={setIsPreparingPhoto} disabled={isPrivacyScanning || isRedacting} maxFiles={Math.max(0, 5 - existingImages.length)} />
+            </div>
             {hasUnavailableReview && (
-              <Button type="button" variant="outline" onClick={() => handleImageChange(images)} disabled={photoWorkPending}>
+              <Button type="button" data-report-photo-correction variant="outline" onClick={() => handleImageChange(images)} disabled={photoWorkPending}>
                 {t('report.retryPhotoReview')}
               </Button>
             )}
@@ -713,7 +755,7 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
         )}
 
         {step === 2 && (
-          <section className="space-y-5" aria-labelledby="details-step-title">
+          <section data-report-step tabIndex={-1} className="space-y-5" aria-labelledby="details-step-title">
             <div><h2 id="details-step-title" className="text-xl font-bold">{t('report.detailsTitle')}</h2><p className="mt-1 text-sm text-surface-500">{t('report.detailsDesc')}</p></div>
             <div className="grid gap-5 sm:grid-cols-2">
               <Input label={t('report.itemName')} name="itemName" value={form.itemName} onChange={(event) => update('itemName', event.target.value)} error={errors.itemName} required />
@@ -731,25 +773,26 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
             <ItemAttributeFields
               values={{ brand: form.brand, model: form.model, colors: form.colors, material: form.material, uniqueFeatures: form.uniqueFeatures }}
               setters={{ setBrand: (value) => update('brand', value), setModel: (value) => update('model', value), setColors: (value) => update('colors', value), setMaterial: (value) => update('material', value), setUniqueFeatures: (value) => update('uniqueFeatures', value) }}
+              errors={errors}
             />
-            <Input label={t('report.searchTags')} name="tags" value={form.tags} onChange={(event) => update('tags', event.target.value)} helperText={t('report.searchTagsHelp')} />
+            <Input label={t('report.searchTags')} name="tags" value={form.tags} onChange={(event) => update('tags', event.target.value)} error={errors.tags} helperText={t('report.searchTagsHelp')} />
           </section>
         )}
 
         {step === 3 && (
-          <section className="space-y-5" aria-labelledby="location-step-title">
+          <section data-report-step tabIndex={-1} className="space-y-5" aria-labelledby="location-step-title">
             <div><h2 id="location-step-title" className="text-xl font-bold">{t('report.locationTitle')}</h2><p className="mt-1 text-sm text-surface-500">{t('report.locationDesc')}</p></div>
             <LocationAssistant label={t(isLost ? 'report.lastSeen' : 'report.foundLocation')} name="location" value={form.location} onChange={(event) => update('location', event.target.value)} error={errors.location} required placeholder={t(isLost ? 'report.lostPlaceholder' : 'report.foundPlaceholder')} />
             <Input label={t(isLost ? 'report.lostDate' : 'report.foundDate')} name="date" type="datetime-local" value={form.date} onChange={(event) => update('date', event.target.value)} error={errors.date} required />
-            {!isLost && <Input label={t('report.storedAt')} name="storedAt" value={form.storedAt} onChange={(event) => update('storedAt', event.target.value)} placeholder={t('report.storedPlaceholder')} helperText={t('report.storedHelp')} />}
+            {!isLost && <Input label={t('report.storedAt')} name="storedAt" value={form.storedAt} onChange={(event) => update('storedAt', event.target.value)} error={errors.storedAt} placeholder={t('report.storedPlaceholder')} helperText={t('report.storedHelp')} />}
           </section>
         )}
 
         {step === 4 && (
-          <section className="space-y-5" aria-labelledby="review-step-title">
+          <section data-report-step tabIndex={-1} className="space-y-5" aria-labelledby="review-step-title">
             <div><h2 id="review-step-title" className="text-xl font-bold">{t('report.reviewTitle')}</h2><p className="mt-1 text-sm text-surface-500">{t('report.reviewDesc')}</p></div>
             <div className="grid gap-5 sm:grid-cols-2">
-              <Select label={t('report.contactChannel')} name="contactPreference" value={form.contactPreference || 'both'} onChange={(event) => update('contactPreference', event.target.value)} options={contactOptions} placeholder="" />
+              <Select label={t('report.contactChannel')} name="contactPreference" value={form.contactPreference || 'both'} onChange={(event) => update('contactPreference', event.target.value)} options={contactOptions} error={errors.contactPreference} placeholder="" />
               <Select
                 label={t('report.contactVisibility')}
                 name="contactVisibility"
@@ -818,6 +861,7 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
             </Button>
           ) : (
             <Button
+              id="report-submit"
               type="submit"
               variant="success"
               isLoading={isLoading}

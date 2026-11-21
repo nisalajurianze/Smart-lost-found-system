@@ -105,6 +105,8 @@ test('provider outage keeps the photo in the draft and requires a successful ret
   await expect(page.locator('[aria-labelledby="image-privacy-review-title"] button')).toHaveCount(0);
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await expect(page.locator('#photo-step-title')).toBeVisible();
+  await page.getByRole('alert', { name: 'Fix these fields' }).getByRole('button', { name: /Photo check is temporarily unavailable/ }).click();
+  await expect(retry).toBeFocused();
   expect(requests.uploads).toBe(1);
   expect(requests.refreshes).toBe(0);
   await retry.click();

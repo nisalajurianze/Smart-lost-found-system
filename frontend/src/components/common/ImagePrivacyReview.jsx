@@ -39,7 +39,7 @@ const ImagePrivacyReview = ({
               <li key={review.key}>{t('report.privacyRegionSummary', { file: review.fileName, count: review.regions.length, reasons: review.regions.map((region) => region.reason).join(', ') })}</li>
             ))}
           </ul>
-          <Button type="button" variant="outline" size="sm" onClick={onRedactRequired} disabled={isRedacting || isScanning} className="mt-3 min-h-11 border-rose-300 bg-white text-rose-800 hover:bg-rose-100 dark:bg-surface-900 dark:text-rose-100">
+          <Button type="button" data-report-photo-correction variant="outline" size="sm" onClick={onRedactRequired} disabled={isRedacting || isScanning} className="mt-3 min-h-11 border-rose-300 bg-white text-rose-800 hover:bg-rose-100 dark:bg-surface-900 dark:text-rose-100">
             {isRedacting ? t('report.privacyCreating') : t('report.privacyPixelate')}
           </Button>
           <p className="mt-2 text-xs">{t('report.privacyReplacement')}</p>
@@ -52,7 +52,7 @@ const ImagePrivacyReview = ({
           <ul className="mt-2 list-disc space-y-1 pl-5">
             {(review.warnings?.length ? review.warnings : [t('report.privacyManualFallback')]).map((warning) => <li key={warning}>{warning}</li>)}
           </ul>
-          {!review.scanUnavailable && <Button type="button" variant="outline" size="sm" onClick={() => onConfirmManualReview(review.key)} className="mt-3 min-h-11">{t('report.privacyManualConfirm')}</Button>}
+          {!review.scanUnavailable && <Button type="button" data-report-photo-correction variant="outline" size="sm" onClick={() => onConfirmManualReview(review.key)} className="mt-3 min-h-11">{t('report.privacyManualConfirm')}</Button>}
         </div>
       ))}
 

@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 if (process.env.PLAYWRIGHT_CHANNEL) test.use({ channel: process.env.PLAYWRIGHT_CHANNEL });
 
 for (const mode of ['lost', 'found']) {
-  test(`${mode} report recovers a stale public draft and shows server field errors before retry`, async ({ page }, testInfo) => {
+  test(`${mode} draft can jump from error summaries to the field or submit action`, async ({ page }, testInfo) => {
     const user = { _id: '507f1f77bcf86cd799439011', fullName: 'Report Test', phone: '0771234567', studentId: 'TEST-01', role: 'student', isVerified: true };
     const submissions = [];
     let savedReport;
@@ -32,7 +32,13 @@ for (const mode of ['lost', 'found']) {
         const form = await new globalThis.Response(request.postDataBuffer(), { headers: { 'content-type': request.headers()['content-type'] } }).formData();
         submissions.push(Object.fromEntries(form));
         if (submissions.length === 1) return route.fulfill({ status: 400, json: {
-          success: false, message: 'Validation failed', errors: [{ field: `${mode}Date`, message: 'Please choose an earlier report date.' }],
+          success: false, message: 'Validation failed', errors: [
+            { field: `${mode}Date`, message: 'Please choose an earlier report date.' },
+            { field: 'uniqueFeatures', message: 'Please shorten the identifying details.' },
+          ],
+        } });
+        if (submissions.length === 2) return route.fulfill({ status: 409, json: {
+          success: false, message: 'Duplicate value for field: assistantSubmissionId. Please use a different value.',
         } });
         savedReport = { ...submissions.at(-1), _id: reportId, images: [] };
         return route.fulfill({ status: 201, json: { success: true, data: savedReport } });
@@ -61,6 +67,11 @@ for (const mode of ['lost', 'found']) {
     await page.getByRole('button', { name: 'Submit report', exact: true }).click();
     await expect(detailsStep).toHaveAttribute('aria-current', 'step');
     await expect(itemName).toBeVisible();
+    const summary = page.getByRole('alert', { name: 'Fix these fields' });
+    await reviewStep.click();
+    await summary.getByRole('button', { name: 'Item name is required.' }).click();
+    await expect(itemName).toBeFocused();
+    await expect(itemName).toBeInViewport();
     expect(submissions).toHaveLength(0);
     await itemName.fill('Headphones');
     await reviewStep.click();
@@ -70,11 +81,23 @@ for (const mode of ['lost', 'found']) {
     await expect(visibility.locator('option[value="public"]')).toHaveCount(0);
     await visibility.selectOption('private');
     await page.getByRole('button', { name: 'Submit report', exact: true }).click();
-    await expect(page.getByRole('alert').getByText('Please choose an earlier report date.', { exact: true })).toBeVisible();
+    const dateError = summary.getByRole('button', { name: 'Please choose an earlier report date.' });
+    await expect(dateError).toBeVisible();
     expect(submissions[0].contactVisibility).toBe('private');
 
+    await summary.getByRole('button', { name: 'Please shorten the identifying details.' }).click();
+    const uniqueFeatures = page.locator('#uniqueFeatures');
+    await expect(uniqueFeatures).toBeFocused();
+    await expect(uniqueFeatures).toBeInViewport();
+    await uniqueFeatures.fill('Silver hinge');
+
+    // Tap the red card itself, outside its text links.
+    const cardPadding = { position: { x: 8, y: 9 } };
+    if (testInfo.project.use.hasTouch) await summary.tap(cardPadding);
+    else await summary.click(cardPadding);
     const date = page.locator('input[name="date"]');
-    await expect(date).toBeVisible();
+    await expect(date).toBeFocused();
+    await expect(date).toBeInViewport();
     await expect(date).toHaveValue('2025-09-09T03:21');
     await expect(date).toHaveCSS('color-scheme', 'dark');
     await date.evaluate((input) => input.scrollIntoView({ block: 'center', behavior: 'instant' }));
@@ -87,10 +110,19 @@ for (const mode of ['lost', 'found']) {
     await page.evaluate(() => document.documentElement.classList.add('dark'));
     await date.fill('2025-09-08T03:21');
     await reviewStep.click();
-    await page.getByRole('button', { name: 'Submit report', exact: true }).click();
+    const submit = page.getByRole('button', { name: 'Submit report', exact: true });
+    await submit.click();
+    const submissionIssue = page.getByRole('alert', { name: 'Could not save report' });
+    await expect(submissionIssue.getByText(/Your text draft is still saved/)).toBeVisible();
+    await expect(page.getByText(/assistantSubmissionId/)).toHaveCount(0);
+    await submissionIssue.getByRole('button', { name: /Your text draft is still saved/ }).click();
+    await expect(submit).toBeFocused();
+    await expect(submit).toBeInViewport();
+    await submit.click();
     await expect(page).toHaveURL(new RegExp(`/dashboard/my-${mode}$`));
-    expect(submissions).toHaveLength(2);
+    expect(submissions).toHaveLength(3);
     expect(submissions[1].contactVisibility).toBe('private');
+    expect(submissions[2].uniqueFeatures).toBe('Silver hinge');
 
     await page.goto(`/dashboard/edit-${mode}/${reportId}`);
     await reviewStep.click();

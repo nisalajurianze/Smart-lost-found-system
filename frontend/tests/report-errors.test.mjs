@@ -45,3 +45,21 @@ test('report errors keep the first useful field message and handle network failu
   assert.deepEqual(reportErrorsForForm(null, 'Try again'), { submit: 'Try again' });
   assert.deepEqual(reportErrorsForForm('Session expired', 'Try again'), { submit: 'Session expired' });
 });
+
+test('assistant submission conflicts point to retry with a user-facing message', () => {
+  const internalMessage = 'Duplicate value for field: assistantSubmissionId. Please use a different value.';
+  for (const error of [
+    { statusCode: 409, message: internalMessage },
+    { errors: [{ field: 'assistantSubmissionId', message: internalMessage }] },
+  ]) {
+    assert.deepEqual(reportErrorsForForm(error, 'Your draft is still saved.'), { submit: 'Your draft is still saved.' });
+  }
+});
+
+test('plain report attachment errors open the Photo step', () => {
+  const message = 'File is too large. Maximum size is 5 MB.';
+  assert.deepEqual(reportErrorsForForm({ statusCode: 400, message }, 'Try again'), { images: message });
+  assert.deepEqual(reportErrorsForForm({ errors: [{ field: 'deletedImages', message: 'Choose the photos again' }] }), {
+    images: 'Choose the photos again',
+  });
+});
