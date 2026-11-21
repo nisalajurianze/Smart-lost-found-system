@@ -5,8 +5,18 @@ if (process.env.PLAYWRIGHT_CHANNEL) test.use({ channel: process.env.PLAYWRIGHT_C
 
 const user = { _id: 'session-test-user', fullName: 'Session Test', email: 'session@example.test', phone: '0771234567', studentId: 'SEU-2026-TEST', role: 'student', isVerified: true };
 
-const setupReport = async (page, { refreshSucceeds, providerUnavailable = false }) => {
-  const requests = { uploads: 0, refreshes: 0, multipartBodies: [], uploadUrls: [] };
+const setupReport = async (page, { refreshSucceeds, providerUnavailable = false, mode = 'lost', completeReport = false }) => {
+  const requests = { uploads: 0, refreshes: 0, multipartBodies: [], uploadUrls: [], submissions: [], categoryWrites: 0 };
+  if (completeReport) {
+    await page.addInitScript(() => {
+      const createBitmap = window.createImageBitmap.bind(window);
+      const ready = new Promise((resolve) => { window.finishPhotoPreparation = resolve; });
+      window.createImageBitmap = async (...args) => {
+        await ready;
+        return createBitmap(...args);
+      };
+    });
+  }
   await page.route('**/socket.io/**', (route) => route.abort());
   await page.route('**/api/**', async (route) => {
     const request = route.request();
@@ -22,13 +32,26 @@ const setupReport = async (page, { refreshSucceeds, providerUnavailable = false 
       requests.uploads += 1;
       requests.uploadUrls.push(request.url());
       requests.multipartBodies.push(request.postDataBuffer());
-      if (providerUnavailable) return reply(503, {}, 'AI image suggestions are temporarily unavailable.');
-      if (requests.uploads === 1) return reply(401, {}, 'Access token expired.');
-      return reply(200, { isSpam: false, isItemPhoto: true, itemName: 'Red striped bag', category: '', description: 'A red bag with dark stripes.', moderationDecision: 'allow', privacyWarnings: [], redactionRegions: [] });
+      if (requests.uploads === 1) {
+        if (providerUnavailable) return reply(503, {}, 'AI image suggestions are temporarily unavailable.');
+        if (!completeReport) return reply(401, {}, 'Access token expired.');
+      }
+      return reply(200, { isSpam: false, isItemPhoto: true, itemName: 'Red striped bag', category: 'Bags', description: 'A red bag with dark stripes.', moderationDecision: 'allow', privacyWarnings: [], redactionRegions: [] });
+    }
+    if (pathname === '/api/categories') return reply(200, [{ _id: 'cat-bags', name: 'Bags', icon: '🎒' }]);
+    if (pathname === '/api/categories/report-auto-create') {
+      requests.categoryWrites += 1;
+      return reply(503, {}, 'Category lookup is temporarily unavailable.');
+    }
+    if (pathname === '/api/ai/report/assess') return reply(200, { quality: { score: 100, suggestions: [] }, duplicates: [] });
+    if (pathname === `/api/${mode}-items` && request.method() === 'POST') {
+      const form = await new globalThis.Response(request.postDataBuffer(), { headers: { 'content-type': request.headers()['content-type'] } }).formData();
+      requests.submissions.push(form);
+      return reply(200, { _id: 'submitted-report', itemName: 'Red striped bag' });
     }
     return reply(200, []);
   });
-  await page.goto('/dashboard/report-lost');
+  await page.goto(`/dashboard/report-${mode}`);
   await expect(page.locator('#image-upload-input')).toBeAttached();
   const image = await page.evaluate(() => {
     const canvas = document.createElement('canvas');
@@ -72,12 +95,57 @@ test('failed upload session refresh returns the protected report to login', asyn
   expect(requests.uploads).toBe(1);
 });
 
-test('provider outage removes the unverified image and blocks manual bypass', async ({ page }) => {
+test('provider outage keeps the photo in the draft and requires a successful retry', async ({ page }) => {
   const requests = await setupReport(page, { providerUnavailable: true });
-  await expect(page.getByRole('button', { name: /Photo removed because automated safety verification is unavailable/ })).toBeVisible();
+  const retry = page.getByRole('button', { name: 'Retry photo check' });
+  await expect(retry).toBeVisible();
+  await expect(page.getByRole('img', { name: /Preview 1/i })).toBeVisible();
   await expect(page.getByText(/Preparing images/)).toHaveCount(0);
   await expect(page.locator('#ai-suggestion-title')).toHaveCount(0);
   await expect(page.locator('[aria-labelledby="image-privacy-review-title"] button')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(page.locator('#photo-step-title')).toBeVisible();
   expect(requests.uploads).toBe(1);
   expect(requests.refreshes).toBe(0);
+  await retry.click();
+  await expect(page.locator('#ai-suggestion-title')).toBeVisible();
+  expect(requests.uploads).toBe(2);
+  expect(requests.multipartBodies[1].toString()).toContain('filename="bag.png"');
 });
+
+for (const mode of ['lost', 'found']) {
+  test(`${mode} report submits the typed category and selected photo on the first attempt`, async ({ page }) => {
+    const requests = await setupReport(page, { mode, completeReport: true });
+    const continueButton = page.getByRole('button', { name: 'Continue', exact: true });
+    await expect(page.getByText(/Preparing images/)).toBeVisible();
+    await expect(continueButton).toBeDisabled();
+    expect(requests.uploads).toBe(0);
+    await page.evaluate(() => window.finishPhotoPreparation());
+    await expect(page.locator('#ai-suggestion-title')).toBeVisible();
+    const image = page.getByRole('img', { name: /Preview 1/i });
+    await expect.poll(() => image.evaluate((element) => element.naturalWidth)).toBeGreaterThan(0);
+    await continueButton.click();
+    await page.locator('input[name="itemName"]').fill('Red striped bag');
+    await page.locator('textarea[name="description"]').fill('A red bag with dark stripes.');
+    await expect(page.locator('input[name="category"]')).toHaveValue('Bags');
+    await page.locator('#category').fill('Sports bags');
+    await continueButton.click();
+    await page.locator('input[name="location"]').fill('SEUSL Main Entrance');
+    await page.locator('input[name="date"]').fill('2025-09-08T03:21');
+    await continueButton.click();
+    await expect(page.getByText('Sports bags', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Submit report', exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/dashboard/my-${mode}$`));
+    expect(requests.categoryWrites).toBe(0);
+    expect(requests.submissions).toHaveLength(1);
+    expect(requests.submissions[0].get('category')).toBe('Sports bags');
+    const photo = requests.submissions[0].get('images');
+    expect(photo.name).toBe('bag.png');
+    expect(photo.type).toBe('image/png');
+    expect(photo.size).toBeGreaterThan(100);
+    expect(requests.uploads).toBe(1);
+    const checkedBody = requests.multipartBodies[0];
+    const checkedBytes = checkedBody.subarray(checkedBody.indexOf('\r\n\r\n') + 4, checkedBody.lastIndexOf('\r\n--'));
+    expect(checkedBytes.equals(Buffer.from(await photo.arrayBuffer()))).toBe(true);
+  });
+}

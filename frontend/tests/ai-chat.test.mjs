@@ -66,5 +66,4 @@ test('guided report categories replace generic box icons with item-aware fallbac
   const source = fs.readFileSync(path.join(frontend, 'src/components/common/ReportItemWizard.jsx'), 'utf8');
   assert.match(source, /getCategoryIcon\(category\.name\)/);
   assert.match(source, /getCategoryIcon\(name\)/);
-  assert.match(source, /getCategoryIcon\(candidate\)/);
 });

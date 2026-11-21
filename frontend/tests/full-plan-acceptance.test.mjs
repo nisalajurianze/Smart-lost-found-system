@@ -18,7 +18,7 @@ test('original assistant, image recognition, category intelligence and review-fi
   assert.match(imageAnalysis, /suggestDetailsFromImage/);
   assert.match(imageAnalysis, /generateCategoryDetails/);
   assert.match(imageAnalysis, /categoryIcon/);
-  assert.match(wizard, /ensureCategory/);
+  assert.match(wizard, /current\.category \? current/);
   assert.match(wizard, /AISuggestionReview/);
   assert.match(review, /onApplyField/);
   assert.match(review, /onDismiss/);

@@ -21,18 +21,17 @@ test('every new public image receives an independent privacy review', () => {
   assert.match(wizard, /for \(const file of filesToReview\)/);
   assert.match(wizard, /normalizeRedactionRegions\(suggestion\.redactionRegions\)/);
   assert.match(wizard, /scanId !== privacyScanId\.current/);
-  assert.match(wizard, /images\.length > activeReviews\.length/);
+  assert.match(wizard, /activeImageKeys\]\.some\(\(key\) => !completedReviews\.has\(key\)\)/);
   assert.match(review, /report\.privacyReviewDesc/);
 });
 
-test('sensitive scans block progress and unavailable safety scans remove the photo', () => {
-  assert.match(wizard, /\['redaction-required', 'manual-review'\]\.includes/);
+test('sensitive or unavailable scans block progress and unavailable scans can be retried', () => {
   assert.match(wizard, /report\.resolvePrivacy/);
   assert.match(review, /report\.privacyPixelate/);
   assert.match(review, /report\.privacyManualConfirm/);
   assert.match(review, /!review\.scanUnavailable/);
   assert.match(wizard, /suggestion\.isItemPhoto !== true/);
-  assert.match(wizard, /const unavailableKeys = new Set/);
-  assert.match(wizard, /unavailableKeys\.add\(key\)/);
+  assert.match(wizard, /hasUnavailableReview\) next\.images/);
+  assert.match(wizard, /onClick=\{\(\) => handleImageChange\(images\)\}/);
   assert.match(wizard, /report\.imageReviewUnavailable/);
 });
