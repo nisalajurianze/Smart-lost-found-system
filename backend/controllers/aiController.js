@@ -6,7 +6,7 @@
 import asyncHandler from '../utils/asyncHandler.js';
 import ApiError from '../utils/apiError.js';
 import ApiResponse from '../utils/apiResponse.js';
-import { suggestDetailsFromImage } from '../services/imageAnalysisService.js';
+import { reviewReportPhoto } from '../services/imageAnalysisService.js';
 import { getAiProviderStatus } from '../services/aiProviderService.js';
 import { needsLocationClarification, publicLocationMatches, publicLocationView, resolveLocation } from '../services/locationIntelligenceService.js';
 import { assessReport } from '../services/reportIntelligenceService.js';
@@ -21,8 +21,7 @@ export const suggestItemDetails = asyncHandler(async (req, res) => {
   if (!req.file) throw ApiError.badRequest('No image provided for AI analysis.');
 
   try {
-    const base64Image = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
-    const suggestions = await suggestDetailsFromImage(base64Image);
+    const suggestions = await reviewReportPhoto(req.file, req.user._id);
     return ApiResponse.ok(suggestions, 'AI suggestions generated successfully').send(res);
   } catch (error) {
     if (error.code === 'IMAGE_POLICY_REFUSAL') {

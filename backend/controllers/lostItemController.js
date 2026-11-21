@@ -39,7 +39,7 @@ const activeCategory = (name) => resolveOrCreateUserCategory(name);
 const createLostItem = asyncHandler(async (req, res) => {
   const category = await activeCategory(req.body.category);
   if (!category) throw ApiError.badRequest('Enter a valid category name.');
-  const images = await uploadMultipleReportImages(req.files || [], 'lost-items');
+  const images = await uploadMultipleReportImages(req.files || [], 'lost-items', req.user._id);
   const session = await mongoose.startSession();
   let item;
   try {
@@ -121,7 +121,7 @@ const updateLostItem = asyncHandler(async (req, res) => {
   const imagesToDelete = item.images.filter((image) => requestedDeletes.has(image.url));
   const imagesLeft = item.images.filter((image) => !requestedDeletes.has(image.url));
   if (imagesLeft.length + (req.files?.length || 0) > 5) throw ApiError.badRequest('Maximum 5 images allowed.');
-  const newImages = await uploadMultipleReportImages(req.files || [], 'lost-items');
+  const newImages = await uploadMultipleReportImages(req.files || [], 'lost-items', req.user._id);
   const session = await mongoose.startSession();
   try {
     await session.withTransaction(async () => {

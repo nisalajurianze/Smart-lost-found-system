@@ -69,11 +69,11 @@ test('report uploads keep authenticated originals separate from stored public-sa
   const found = fs.readFileSync(new URL('../controllers/foundItemController.js', import.meta.url), 'utf8');
   assert.match(service, /authenticated:\s*true/);
   assert.match(service, /flags:\s*'force_strip'/);
-  assert.match(service, /await verifyReportImages\(files\)/);
+  assert.match(service, /await verifyReportImages\(files, ownerId\)/);
   assert.doesNotMatch(service, /effect:\s*'pixelate:/);
   assert.match(service, /privacyStatus:\s*'safe_public'/);
-  assert.match(lost, /uploadMultipleReportImages/);
-  assert.match(found, /uploadMultipleReportImages/);
+  assert.match(lost, /uploadMultipleReportImages\(req\.files \|\| \[\], 'lost-items', req\.user\._id\)/);
+  assert.match(found, /uploadMultipleReportImages\(req\.files \|\| \[\], 'found-items', req\.user\._id\)/);
 });
 
 test('restricted public location intelligence withholds exact canonical identity', () => {

@@ -9,7 +9,7 @@ const aiService = {
       headers: {
         'Content-Type': 'multipart/form-data'
       },
-      timeout: 20_000,
+      timeout: 95_000,
     });
     return response.data;
   },
@@ -22,11 +22,6 @@ const aiService = {
   assessReportDraft: async (payload) => {
     const response = await api.post('/ai/report/assess', payload);
     return response.data.data;
-  },
-
-  autoCreateCategory: async (name) => {
-    const response = await api.post('/categories/report-auto-create', { name });
-    return response.data;
   }
 };
 

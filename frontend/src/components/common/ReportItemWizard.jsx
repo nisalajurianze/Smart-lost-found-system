@@ -88,8 +88,6 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
   const [step, setStep] = useState(1);
   const [errors, setErrors] = useState({});
   const [isLoading, setIsLoading] = useState(false);
-  const [isCategoryLoading, setIsCategoryLoading] = useState(false);
-  const [extraCategory, setExtraCategory] = useState(null);
   const [aiSuggestion, setAISuggestion] = useState(null);
   const [draftRestored, setDraftRestored] = useState(false);
   const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
@@ -99,11 +97,15 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
   const [reportAssessment, setReportAssessment] = useState(null);
   const [isAssessing, setIsAssessing] = useState(false);
   const [isPrivacyScanning, setIsPrivacyScanning] = useState(false);
+  const [isPreparingPhoto, setIsPreparingPhoto] = useState(false);
   const [isRedacting, setIsRedacting] = useState(false);
   const [imagePrivacyReviews, setImagePrivacyReviews] = useState([]);
   const [isOnline, setIsOnline] = useState(() => typeof navigator === 'undefined' ? true : navigator.onLine);
   const [uploadProgress, setUploadProgress] = useState(null);
   const privacyScanId = useRef(0);
+  const submitting = useRef(false);
+  const photoWorkPending = isPreparingPhoto || isPrivacyScanning || isRedacting;
+  const hasUnavailableReview = imagePrivacyReviews.some((review) => review.status === 'scan-unavailable');
   const steps = useMemo(() => stepDefinitions.map((entry) => ({ ...entry, label: t(entry.labelKey) })), [t]);
   const locale = language === 'si' ? 'si-LK' : language === 'ta' ? 'ta-LK' : 'en-US';
 
@@ -164,7 +166,7 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
       localStorage.removeItem(draftKey);
     }
 
-    setForm({ ...emptyForm, ...nextForm, contactVisibility: CONTACT_VISIBILITY });
+    setForm({ ...emptyForm, ...nextForm, category: String(nextForm.category || ''), contactVisibility: CONTACT_VISIBILITY });
     setStep(nextStep);
     if (isEdit) setExistingImages(Array.isArray(currentItem.images) ? currentItem.images : []);
     setDeletedImages([]);
@@ -190,53 +192,24 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
       value: category.name,
       label: `${category.icon && category.icon !== '📦' ? category.icon : getCategoryIcon(category.name)} ${category.name}`,
     }));
-    if (extraCategory && !categories.some((category) => category.name === extraCategory.value)) values.push(extraCategory);
-    return values;
-  }, [categories, extraCategory]);
-
-  const ensureCategory = async (value, icon = '📦') => {
-    const candidate = String(value || '').trim();
-    if (!candidate) return '';
-    // The server resolves plural/breadcrumb aliases against active categories,
-    // including legacy duplicates that would otherwise look like exact matches.
-    setIsCategoryLoading(true);
-    try {
-      const response = await aiService.autoCreateCategory(candidate);
-      const name = response.data.name || candidate;
-      const resolvedIcon = response.data.icon && response.data.icon !== '📦'
-        ? response.data.icon
-        : (icon && icon !== '📦' ? icon : getCategoryIcon(name));
-      setExtraCategory({ value: name, label: `${resolvedIcon} ${name}` });
-      update('category', name);
-      await dispatch(fetchCategories());
-      return name;
-    } catch {
-      const resolvedIcon = icon && icon !== '📦' ? icon : getCategoryIcon(candidate);
-      setExtraCategory({ value: candidate, label: `${resolvedIcon} ${candidate}` });
-      update('category', candidate);
-      setErrors((current) => {
-        const next = { ...current };
-        delete next.category;
-        return next;
-      });
-      toast(t('report.customCategoryPending', { category: candidate }));
-      return candidate;
-    } finally {
-      setIsCategoryLoading(false);
+    const name = form.category;
+    if (name && !values.some((option) => option.value === name)) {
+      const suggestedIcon = aiSuggestion?.category === name ? aiSuggestion.categoryIcon : '';
+      const icon = suggestedIcon && suggestedIcon !== '📦' ? suggestedIcon : getCategoryIcon(name);
+      values.push({ value: name, label: `${icon} ${name}` });
     }
-  };
+    return values;
+  }, [aiSuggestion, categories, form.category]);
 
-  const applySuggestionField = async (field, value) => {
+  const applySuggestionField = (field, value) => {
     const text = Array.isArray(value) ? value.join(', ') : String(value || '');
-    const mapped = field === 'uniqueMarks' ? 'uniqueFeatures' : field;
-    if (mapped === 'category') await ensureCategory(text, aiSuggestion?.categoryIcon);
-    else update(mapped, text);
+    update(field === 'uniqueMarks' ? 'uniqueFeatures' : field, field === 'category' ? text.trim() : text);
   };
 
-  const applyAllSuggestions = async () => {
+  const applyAllSuggestions = () => {
     if (!aiSuggestion) return;
     for (const field of ['itemName', 'category', 'description', 'tags', 'brand', 'model', 'colors', 'material', 'uniqueMarks']) {
-      if (aiSuggestion[field]) await applySuggestionField(field, aiSuggestion[field]);
+      if (aiSuggestion[field]) applySuggestionField(field, aiSuggestion[field]);
     }
     toast.success(t('report.suggestionsApplied'));
   };
@@ -245,7 +218,7 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
     const scanId = privacyScanId.current + 1;
     privacyScanId.current = scanId;
     const nextKeys = new Set(nextImages.map(imageFileKey));
-    const retainedReviews = imagePrivacyReviews.filter((review) => nextKeys.has(review.key));
+    const retainedReviews = imagePrivacyReviews.filter((review) => nextKeys.has(review.key) && review.status !== 'scan-unavailable');
     const reviewedKeys = new Set(retainedReviews.map((review) => review.key));
     const filesToReview = nextImages.filter((file) => !reviewedKeys.has(imageFileKey(file)));
 
@@ -265,7 +238,6 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
     const toastId = toast.loading(t('report.checkingPhotos', { count: filesToReview.length }));
     const newReviews = [];
     const rejectedKeys = new Set();
-    const unavailableKeys = new Set();
     const rejectionMessages = [];
     let firstSuggestion = null;
 
@@ -291,11 +263,13 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
             : (warnings.length > 0 || suggestion.moderationDecision === 'review' ? 'manual-review' : 'safe');
           newReviews.push({ key, fileName: file.name || t('report.selectedPhoto'), regions, warnings, status, moderationDecision: suggestion.moderationDecision, isItemPhoto: suggestion.isItemPhoto });
           if (!firstSuggestion) firstSuggestion = suggestion;
-        } catch {
-          // Safety verification is fail-closed: an unavailable provider must
-          // never leave an unverified public image in the draft.
-          unavailableKeys.add(key);
-          rejectedKeys.add(key);
+        } catch (error) {
+          if ([400, 413, 415].includes(error?.statusCode)) {
+            rejectedKeys.add(key);
+            rejectionMessages.push(`${file.name}: ${error.message}`);
+          } else {
+            newReviews.push({ key, status: 'scan-unavailable' });
+          }
         }
       }
 
@@ -307,9 +281,11 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
       setImagePrivacyReviews([...retainedReviews, ...newReviews]);
       if (firstSuggestion) {
         setAISuggestion(firstSuggestion);
-        if (firstSuggestion.category) await ensureCategory(firstSuggestion.category, firstSuggestion.categoryIcon);
+        if (firstSuggestion.category) {
+          setForm((current) => current.category ? current : { ...current, category: firstSuggestion.category.trim() });
+        }
       }
-      if (unavailableKeys.size > 0) {
+      if (newReviews.some((review) => review.status === 'scan-unavailable')) {
         const message = [...rejectionMessages, t('report.imageReviewUnavailable')].join('\n');
         setErrors((current) => ({ ...current, images: message }));
         toast.error(message, { id: toastId });
@@ -350,7 +326,7 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
               warnings: remainingWarnings.slice(0, 10),
             });
           } catch {
-            rescans.set(review.key, { safe: false, regions: [], warnings: [t('report.redactionRescanUnavailable')] });
+            rescans.set(review.key, { unavailable: true, regions: [], warnings: [t('report.redactionRescanUnavailable')] });
           }
         }
       }
@@ -362,7 +338,7 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
           ...review,
           key: imageFileKey(replacement),
           fileName: replacement.name,
-          status: rescan?.safe ? 'redacted' : 'manual-review',
+          status: rescan?.unavailable ? 'scan-unavailable' : rescan?.safe ? 'redacted' : 'manual-review',
           regions: rescan?.regions || [],
           warnings: rescan?.warnings || [],
           rescannedAt: new Date().toISOString(),
@@ -375,8 +351,9 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
         delete next.images;
         return next;
       });
-      const needsManualReview = [...rescans.values()].some((entry) => !entry.safe);
-      if (needsManualReview) toast(t('report.redactionNeedsReview'), { id: toastId });
+      const results = [...rescans.values()];
+      if (results.some((entry) => entry.unavailable)) toast.error(t('report.imageReviewUnavailable'), { id: toastId });
+      else if (results.some((entry) => !entry.safe)) toast(t('report.redactionNeedsReview'), { id: toastId });
       else toast.success(t('report.privacyRedacted'), { id: toastId });
     } catch (error) {
       const errorKey = {
@@ -406,23 +383,26 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
   const validate = () => {
     const next = {};
     if (!form.itemName.trim()) next.itemName = t('report.itemRequired');
-    if (!form.category) next.category = t('report.categoryRequired');
+    const category = form.category.normalize('NFKC').trim();
+    if (!category) next.category = t('report.categoryRequired');
+    else if (category.length > 100) next.category = t('report.categoryTooLong');
     if (form.description.trim().length < 10) next.description = t('report.descriptionRequired');
     if (!form.location.trim()) next.location = t('report.locationRequired', { type: t(isLost ? 'report.lost' : 'report.found') });
     if (!form.date) next.date = t('report.dateRequired', { type: t(isLost ? 'report.lost' : 'report.found') });
     else if (Number.isNaN(new Date(form.date).getTime()) || new Date(form.date) > new Date()) next.date = t('report.dateFuture');
+    const activeImageKeys = new Set(images.map(imageFileKey));
+    const completedReviews = new Set(imagePrivacyReviews.filter((review) => (
+      ['safe', 'redacted', 'manually-reviewed'].includes(review.status)
+    )).map((review) => review.key));
+    if (photoWorkPending) next.images = t('report.waitPrivacy');
+    else if (hasUnavailableReview) next.images = t('report.imageReviewUnavailable');
+    else if ([...activeImageKeys].some((key) => !completedReviews.has(key))) next.images = t('report.resolvePrivacy');
     return next;
   };
 
   const validateCurrentStep = () => {
     const all = validate();
     const relevant = Object.fromEntries(Object.entries(all).filter(([field]) => fieldStep[field] === step));
-    if (step === 1 && isPrivacyScanning) relevant.images = t('report.waitPrivacy');
-    const activeImageKeys = new Set(images.map(imageFileKey));
-    const activeReviews = imagePrivacyReviews.filter((review) => activeImageKeys.has(review.key));
-    const unresolvedPrivacy = activeReviews.some((review) => ['redaction-required', 'manual-review'].includes(review.status));
-    if (step === 1 && images.length > activeReviews.length) relevant.images = t('report.everyPhotoReview');
-    else if (step === 1 && unresolvedPrivacy) relevant.images = t('report.resolvePrivacy');
     setErrors((current) => ({ ...current, ...relevant }));
     return Object.keys(relevant).length === 0;
   };
@@ -456,6 +436,7 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
   };
 
   const goNext = async () => {
+    if (photoWorkPending || isAssessing) return;
     if (!validateCurrentStep()) {
       toast.error(t('report.fixHighlighted'));
       return;
@@ -476,7 +457,6 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
     setIsPrivacyScanning(false);
     setImagePrivacyReviews([]);
     setReportAssessment(null);
-    setExtraCategory(null);
     setErrors({});
     setStep(1);
     setDraftRestored(false);
@@ -500,6 +480,7 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    if (step !== 4 || submitting.current) return;
     if (!navigator.onLine) {
       setIsOnline(false);
       toast.error(t('report.offlineSubmit'));
@@ -512,13 +493,14 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
       toast.error(t('report.reviewErrors'));
       return;
     }
+    submitting.current = true;
     setIsLoading(true);
     setUploadProgress(0);
     setErrors({});
     try {
       const data = new FormData();
       data.append('itemName', form.itemName.trim());
-      data.append('category', form.category);
+      data.append('category', form.category.trim());
       data.append('description', form.description.trim());
       data.append(isLost ? 'lostLocation' : 'foundLocation', form.location.trim());
       data.append(isLost ? 'lostDate' : 'foundDate', new Date(form.date).toISOString());
@@ -543,6 +525,7 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
       window.scrollTo({ top: 0, behavior: 'smooth' });
       toast.error(Object.values(fieldErrors)[0]);
     } finally {
+      submitting.current = false;
       setIsLoading(false);
       setUploadProgress(null);
     }
@@ -601,6 +584,7 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
           variant="ghost"
           className="text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:text-rose-400 dark:hover:bg-rose-950/40 dark:hover:text-rose-300 font-semibold text-xs sm:text-sm"
           onClick={() => setIsClearConfirmOpen(true)}
+          disabled={isLoading || photoWorkPending || isAssessing}
         >
           {t('report.clearDraft')}
         </Button>
@@ -640,7 +624,7 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
               key={id}
               type="button"
               onClick={() => id < step && setStep(id)}
-              disabled={id > step}
+              disabled={id > step || isLoading || isAssessing}
               aria-current={isCurrent ? 'step' : undefined}
               className={`min-h-11 sm:min-h-14 rounded-xl border px-1 sm:px-3 py-2 text-center sm:text-left text-xs sm:text-sm font-semibold transition flex items-center justify-center sm:justify-start gap-1 sm:gap-2 ${stepClass}`}
             >
@@ -684,7 +668,12 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
                 </div>
               </div>
             )}
-            <ImageUpload images={images} onChange={handleImageChange} maxFiles={Math.max(0, 5 - existingImages.length)} error={errors.images} />
+            <ImageUpload images={images} onChange={handleImageChange} onPreparingChange={setIsPreparingPhoto} disabled={isPrivacyScanning || isRedacting} maxFiles={Math.max(0, 5 - existingImages.length)} />
+            {hasUnavailableReview && (
+              <Button type="button" variant="outline" onClick={() => handleImageChange(images)} disabled={photoWorkPending}>
+                {t('report.retryPhotoReview')}
+              </Button>
+            )}
             <ImagePrivacyReview
               reviews={imagePrivacyReviews}
               isScanning={isPrivacyScanning}
@@ -706,8 +695,7 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
                 name="category"
                 options={categoryOptions}
                 value={form.category}
-                isLoading={isCategoryLoading}
-                onChange={(event) => ensureCategory(event.target.value)}
+                onChange={(event) => update('category', event.target.value.trim())}
                 error={errors.category}
                 required
               />
@@ -782,11 +770,12 @@ const ReportItemWizard = ({ mode, itemId = null }) => {
         )}
 
         <div className="mt-7 flex flex-wrap items-center justify-between gap-3 border-t border-surface-200 pt-5 dark:border-surface-800">
-          <Button type="button" variant="outline" onClick={() => setStep((current) => Math.max(1, current - 1))} disabled={step === 1} icon={<ChevronLeft className="h-4 w-4" />}>{t('report.back')}</Button>
+          <Button type="button" variant="outline" onClick={() => setStep((current) => Math.max(1, current - 1))} disabled={step === 1 || isLoading || isAssessing} icon={<ChevronLeft className="h-4 w-4" />}>{t('report.back')}</Button>
           {step < 4 ? (
             <Button
               type="button"
               onClick={goNext}
+              disabled={photoWorkPending || isAssessing}
               className={isLost ? '!bg-rose-600 hover:!bg-rose-700 !text-white' : '!bg-emerald-600 hover:!bg-emerald-700 !text-white'}
             >
               {t('report.continue')} <ChevronRight className="h-4 w-4" />

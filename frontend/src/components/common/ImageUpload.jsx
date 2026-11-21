@@ -9,13 +9,14 @@ import { BiLoaderAlt } from 'react-icons/bi';
 import toast from 'react-hot-toast';
 import imageCompression from 'browser-image-compression';
 import { IMAGE_TRANSFORM_ERROR_CODES, transformImageFile } from '../../utils/imageTransform';
-import { imageFileKey } from '../../utils/imageRedaction';
 import { useLanguage } from '../../i18n/LanguageContext';
 import { assessImageFile } from '../../utils/imageQuality';
 
 export const ImageUpload = ({
   images = [],
   onChange,
+  onPreparingChange,
+  disabled = false,
   maxFiles = 5,
   label = null
 }) => {
@@ -25,45 +26,32 @@ export const ImageUpload = ({
   const [showOptions, setShowOptions] = useState(false);
   const [editingIndex, setEditingIndex] = useState(null);
   const [preparationProgress, setPreparationProgress] = useState(null);
-  const previewsRef = React.useRef([]);
+  const preparing = React.useRef(false);
+  const busy = disabled || isCompressing || editingIndex !== null;
 
   // Keep object URLs aligned with the parent image list, including moderation removals and edits.
   React.useEffect(() => {
-    setPreviews((current) => {
-      const currentByKey = new Map(current.map((preview) => [preview.key, preview]));
-      const next = images.map((image) => {
-        const key = imageFileKey(image);
-        const existing = currentByKey.get(key);
-        if (existing) return existing;
-        if (image instanceof File || image instanceof Blob) return { key, url: URL.createObjectURL(image), owned: true };
-        return { key, url: image?.url || image?.secureUrl || image, owned: false };
-      });
-      const nextKeys = new Set(next.map((preview) => preview.key));
-      current.forEach((preview) => {
-        if (preview.owned && !nextKeys.has(preview.key)) URL.revokeObjectURL(preview.url);
-      });
-      return next;
+    const next = images.map((image) => {
+      const owned = image instanceof Blob;
+      return { image, url: owned ? URL.createObjectURL(image) : image?.url || image?.secureUrl || image, owned };
+    });
+    setPreviews(next);
+    return () => next.forEach(({ owned, url }) => {
+      if (owned) URL.revokeObjectURL(url);
     });
   }, [images]);
 
-  React.useEffect(() => {
-    previewsRef.current = previews;
-  }, [previews]);
-
-  React.useEffect(() => () => {
-    previewsRef.current.forEach((preview) => {
-      if (preview.owned) URL.revokeObjectURL(preview.url);
-    });
-  }, []);
-
   const handleFiles = async (files) => {
+    if (busy || preparing.current || files.length === 0) return;
     const totalFiles = images.length + files.length;
     if (totalFiles > maxFiles) {
       toast.error(t('report.uploadMax', { max: maxFiles }));
       return;
     }
 
+    preparing.current = true;
     setIsCompressing(true);
+    onPreparingChange?.(true);
     setPreparationProgress({ completed: 0, total: files.length });
     const validFiles = [];
 
@@ -91,7 +79,7 @@ export const ImageUpload = ({
         }
         if (quality.score < 60) toast(t('report.photoQualityWarn', { guidance: quality.guidance.join(', ') || t('report.photoQualityBetter') }));
         const compressedFile = await imageCompression(file, options);
-        validFiles.push(compressedFile);
+        validFiles.push(new File([compressedFile], file.name, { type: compressedFile.type, lastModified: file.lastModified }));
       } catch (error) {
         console.error("Compression error:", error);
         toast.error(t('report.uploadCompressFailed', { file: file.name }));
@@ -100,10 +88,16 @@ export const ImageUpload = ({
       }
     }
 
-    setIsCompressing(false);
-    setPreparationProgress(null);
-    if (validFiles.length > 0) {
-      await onChange([...images, ...validFiles]);
+    try {
+      if (validFiles.length > 0) {
+        const update = onChange([...images, ...validFiles]);
+        void Promise.resolve(update).catch((error) => console.error('Image update failed:', error));
+      }
+    } finally {
+      preparing.current = false;
+      setIsCompressing(false);
+      setPreparationProgress(null);
+      onPreparingChange?.(false);
     }
   };
 
@@ -115,18 +109,21 @@ export const ImageUpload = ({
   };
 
   const handleInput = (e) => {
-    if (e.target.files) {
-      handleFiles(e.target.files);
-    }
+    const files = Array.from(e.currentTarget.files || []);
+    e.currentTarget.value = '';
+    void handleFiles(files);
   };
 
   const editImage = async (index, options) => {
+    if (busy || preparing.current) return;
     const source = images[index];
     if (!(source instanceof Blob)) {
       toast.error(t('report.uploadOnlyNew'));
       return;
     }
+    preparing.current = true;
     setEditingIndex(index);
+    onPreparingChange?.(true);
     const toastId = toast.loading(options.cropSquare ? t('report.uploadCropping') : t('report.uploadRotating'));
     try {
       const edited = await transformImageFile(source, options);
@@ -149,11 +146,14 @@ export const ImageUpload = ({
       }[error?.code] || 'report.uploadEditFailed';
       toast.error(t(errorKey), { id: toastId });
     } finally {
+      preparing.current = false;
       setEditingIndex(null);
+      onPreparingChange?.(false);
     }
   };
 
   const removeImage = (index) => {
+    if (busy || preparing.current) return;
     onChange(images.filter((_, imageIndex) => imageIndex !== index));
   };
 
@@ -167,17 +167,18 @@ export const ImageUpload = ({
           onDragOver={(e) => e.preventDefault()}
           onDrop={handleDrop}
           role={showOptions ? 'group' : 'button'}
-          tabIndex={showOptions ? -1 : 0}
+          tabIndex={showOptions || busy ? -1 : 0}
+          aria-disabled={busy || undefined}
           aria-label={showOptions ? t('report.uploadChooseMethod') : t('report.uploadOpenOptions')}
           onKeyDown={(event) => {
-            if (!showOptions && (event.key === 'Enter' || event.key === ' ')) {
+            if (!busy && !showOptions && (event.key === 'Enter' || event.key === ' ')) {
               event.preventDefault();
               setShowOptions(true);
             }
           }}
           className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-surface-300 dark:border-surface-600 rounded-xl bg-surface-50 dark:bg-surface-800/50 hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors cursor-pointer min-h-[140px]"
-          onClick={(e) => {
-            if (showOptions) return;
+          onClick={() => {
+            if (busy || showOptions) return;
             setShowOptions(true);
           }}
         >
@@ -244,6 +245,7 @@ export const ImageUpload = ({
             type="file"
             multiple
             accept="image/*"
+            disabled={busy}
             className="hidden"
             onChange={handleInput}
           />
@@ -253,6 +255,7 @@ export const ImageUpload = ({
             multiple
             accept="image/*"
             capture="environment"
+            disabled={busy}
             className="hidden"
             onChange={handleInput}
           />
@@ -264,7 +267,7 @@ export const ImageUpload = ({
         <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
           {images.map((img, index) => {
             const isFile = img instanceof File || img instanceof Blob;
-            const src = previews[index]?.url || (isFile ? '' : img.url || img.secureUrl || img);
+            const src = previews[index]?.image === img ? previews[index].url : (isFile ? undefined : img.url || img.secureUrl || img);
 
             return (
               <div key={`${img.name || img.url || 'image'}-${index}`} className="overflow-hidden rounded-xl border border-surface-200 bg-surface-100 dark:border-surface-700 dark:bg-surface-800">
@@ -277,9 +280,9 @@ export const ImageUpload = ({
                   {editingIndex === index && <div className="absolute inset-0 flex items-center justify-center bg-black/45 text-sm font-semibold text-white" role="status"><BiLoaderAlt className="mr-2 animate-spin" aria-hidden="true" /> {t('report.uploadEditing')}</div>}
                 </div>
                 <div className="grid grid-cols-3 border-t border-surface-200 dark:border-surface-700">
-                  <button type="button" onClick={() => editImage(index, { rotation: 90 })} disabled={editingIndex !== null} className="flex min-h-11 items-center justify-center text-surface-600 hover:bg-white hover:text-primary-700 disabled:opacity-50 dark:text-surface-300 dark:hover:bg-surface-700" aria-label={t('report.uploadRotate', { index: index + 1 })}><FiRotateCw aria-hidden="true" /></button>
-                  <button type="button" onClick={() => editImage(index, { cropSquare: true })} disabled={editingIndex !== null} className="flex min-h-11 items-center justify-center border-x border-surface-200 text-surface-600 hover:bg-white hover:text-primary-700 disabled:opacity-50 dark:border-surface-700 dark:text-surface-300 dark:hover:bg-surface-700" aria-label={t('report.uploadCrop', { index: index + 1 })}><FiCrop aria-hidden="true" /></button>
-                  <button type="button" onClick={() => removeImage(index)} disabled={editingIndex !== null} className="flex min-h-11 items-center justify-center text-rose-600 hover:bg-rose-50 disabled:opacity-50 dark:text-rose-300 dark:hover:bg-rose-950/30" aria-label={t('report.uploadRemove', { index: index + 1 })}><FiX aria-hidden="true" /></button>
+                  <button type="button" onClick={() => editImage(index, { rotation: 90 })} disabled={busy} className="flex min-h-11 items-center justify-center text-surface-600 hover:bg-white hover:text-primary-700 disabled:opacity-50 dark:text-surface-300 dark:hover:bg-surface-700" aria-label={t('report.uploadRotate', { index: index + 1 })}><FiRotateCw aria-hidden="true" /></button>
+                  <button type="button" onClick={() => editImage(index, { cropSquare: true })} disabled={busy} className="flex min-h-11 items-center justify-center border-x border-surface-200 text-surface-600 hover:bg-white hover:text-primary-700 disabled:opacity-50 dark:border-surface-700 dark:text-surface-300 dark:hover:bg-surface-700" aria-label={t('report.uploadCrop', { index: index + 1 })}><FiCrop aria-hidden="true" /></button>
+                  <button type="button" onClick={() => removeImage(index)} disabled={busy} className="flex min-h-11 items-center justify-center text-rose-600 hover:bg-rose-50 disabled:opacity-50 dark:text-rose-300 dark:hover:bg-rose-950/30" aria-label={t('report.uploadRemove', { index: index + 1 })}><FiX aria-hidden="true" /></button>
                 </div>
               </div>
             );

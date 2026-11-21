@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import ImageAnalysis from '../models/ImageAnalysis.js';
 import ApiError from '../utils/apiError.js';
 import { imageRejectionReason, imageRejectionMessages } from '../utils/imageRejectionReason.js';
@@ -179,7 +180,27 @@ const needsPublicRedaction = (value) => value.privacyWarnings.length > 0
     return region?.category !== 'item-marking' || !text || maskSensitiveText(text) !== text;
   });
 
-const suggestDetailsFromImage = async (imageUrl, { forPublicUpload = false } = {}) => {
+const isAllowedReportPhoto = (suggestion) => suggestion.isItemPhoto === true
+  && suggestion.isSpam === false
+  && suggestion.moderationDecision === 'allow'
+  && ['fair', 'good'].includes(suggestion.imageQuality)
+  && !hasBlockedImageContent(suggestion);
+
+// Reuse a recent server approval for the same account, MIME type and exact bytes.
+// A cache miss still goes through the full public upload check.
+const approvedReportPhotos = new Map();
+const reportPhotoKey = (file, ownerId) => ownerId
+  ? JSON.stringify([String(ownerId), file.mimetype, createHash('sha256').update(file.buffer).digest('hex')])
+  : null;
+const reportPhotoData = (file) => `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+
+const rememberReportPhotoApproval = (key) => {
+  approvedReportPhotos.delete(key);
+  approvedReportPhotos.set(key, Date.now() + 15 * 60_000);
+  if (approvedReportPhotos.size > 1024) approvedReportPhotos.delete(approvedReportPhotos.keys().next().value);
+};
+
+const suggestDetailsFromImage = async (imageUrl, { forPublicUpload = false, reviewKey = null } = {}) => {
   if (!aiConfigured({ vision: true })) throw new Error('AI image suggestions are not configured.');
   if (!String(imageUrl).startsWith('data:image/')) throw new Error('Only uploaded image data is accepted.');
   const response = await requestAIJson([{
@@ -198,19 +219,20 @@ const suggestDetailsFromImage = async (imageUrl, { forPublicUpload = false } = {
     vision: true,
     purpose: 'report-auto-fill',
     validator: (value) => suggestionValidator(value)
-      && (!forPublicUpload || value.moderationDecision !== 'allow' || hasPrivacyAssessment(value)),
+      && (!(forPublicUpload || reviewKey) || value.moderationDecision !== 'allow' || hasPrivacyAssessment(value)),
     allowSensitiveOutput: true,
   });
   const result = response?.data;
   if (!result) throw new Error('AI provider returned an invalid suggestion.');
-  if (forPublicUpload && result.moderationDecision === 'allow' && needsPublicRedaction(result)) {
+  const privacyReviewRequired = result.moderationDecision === 'allow' && hasPrivacyAssessment(result) && needsPublicRedaction(result);
+  if (forPublicUpload && privacyReviewRequired) {
     const message = 'Crop or mask the sensitive details in this photo, then upload it again.';
     const error = ApiError.badRequest(message, [{ field: 'images', message }]);
     error.code = 'IMAGE_PRIVACY_REVIEW';
     throw error;
   }
   const rejectionReason = imageRejectionReason(result);
-  return {
+  const suggestion = {
     rejectionReason,
     rejectionMessage: imageRejectionMessages[rejectionReason],
     isSpam: result.isSpam,
@@ -236,42 +258,48 @@ const suggestDetailsFromImage = async (imageUrl, { forPublicUpload = false } = {
     ocrRegions: (Array.isArray(result.ocrRegions) ? result.ocrRegions : []).map((region) => ({ ...sanitizeRegion(region), textMasked: maskSensitiveText(region?.text), confidence: Math.max(0, Math.min(100, Number(region?.confidence) || 0)), category: String(region?.category || 'other').slice(0, 40) })).filter((region) => region.width > 0 && region.height > 0).slice(0, 30),
     providerMeta: { model: response.meta.model, latencyMs: response.meta.latencyMs, attempts: response.meta.attempts },
   };
+  if (reviewKey && suggestion.moderationDecision === 'allow') {
+    if (!isAllowedReportPhoto(suggestion)) {
+      return { ...suggestion, moderationDecision: 'reject' };
+    }
+    if (!privacyReviewRequired) rememberReportPhotoApproval(reviewKey);
+    else if (!suggestion.privacyWarnings.length && !suggestion.redactionRegions.length) {
+      suggestion.privacyWarnings.push('Crop or mask the sensitive details in this photo.');
+    }
+  }
+  return suggestion;
 };
 
-const verifyReportImages = async (files = []) => {
+const reviewReportPhoto = (file, ownerId) => suggestDetailsFromImage(reportPhotoData(file), {
+  reviewKey: reportPhotoKey(file, ownerId),
+});
+
+const reportPhotoError = (code, status, message) => {
+  const error = new ApiError(status, message, [{ field: 'images', message }]);
+  error.code = code;
+  return error;
+};
+
+const verifyReportImages = async (files = [], ownerId) => {
   for (const file of files) {
-    const imageUrl = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+    const key = reportPhotoKey(file, ownerId);
+    if (key && approvedReportPhotos.get(key) > Date.now()) continue;
     let suggestion;
     try {
-      suggestion = await suggestDetailsFromImage(imageUrl, { forPublicUpload: true });
+      suggestion = await suggestDetailsFromImage(reportPhotoData(file), { forPublicUpload: true });
     } catch (error) {
       if (error.code === 'IMAGE_PRIVACY_REVIEW') throw error;
       if (error.code === 'IMAGE_POLICY_REFUSAL') {
-        const rejection = new Error('The AI provider declined to analyze this image under its safety policy. Upload a different photo of the item.');
-        rejection.code = 'IMAGE_NOT_ALLOWED';
-        rejection.statusCode = 400;
-        rejection.isOperational = true;
-        throw rejection;
+        throw reportPhotoError('IMAGE_NOT_ALLOWED', 400, 'The AI provider declined to analyze this image under its safety policy. Upload a different photo of the item.');
       }
-      const wrapped = new Error('Image safety verification is temporarily unavailable. Remove the photo or retry.');
-      wrapped.code = 'IMAGE_SAFETY_UNAVAILABLE';
-      wrapped.statusCode = 503;
-      wrapped.isOperational = true;
+      const wrapped = reportPhotoError('IMAGE_SAFETY_UNAVAILABLE', 503, 'Image safety verification is temporarily unavailable. Remove the photo or retry.');
       wrapped.cause = error;
       throw wrapped;
     }
-    const allowed = suggestion?.isItemPhoto === true
-      && suggestion.isSpam === false
-      && suggestion.moderationDecision === 'allow'
-      && ['fair', 'good'].includes(suggestion.imageQuality)
-      && !hasBlockedImageContent(suggestion);
-    if (!allowed) {
-      const rejection = new Error(suggestion.rejectionMessage || imageRejectionMessages.rejected);
-      rejection.code = 'IMAGE_NOT_ALLOWED';
-      rejection.statusCode = 400;
-      rejection.isOperational = true;
-      throw rejection;
+    if (!isAllowedReportPhoto(suggestion)) {
+      throw reportPhotoError('IMAGE_NOT_ALLOWED', 400, suggestion.rejectionMessage || imageRejectionMessages.rejected);
     }
+    if (key) rememberReportPhotoApproval(key);
   }
   return true;
 };
@@ -296,6 +324,7 @@ export {
   analyzeItemImage,
   generateCategoryDetails,
   suggestDetailsFromImage,
+  reviewReportPhoto,
   verifyReportImages,
   generateKeywordsFromText,
   parseJSONResponse,

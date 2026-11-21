@@ -81,9 +81,9 @@ const uploadMultipleImages = async (files = [], folder = 'smart-lf', options = {
   }
 };
 
-const uploadMultipleReportImages = async (files = [], folder = 'smart-lf') => {
+const uploadMultipleReportImages = async (files = [], folder = 'smart-lf', ownerId) => {
   if (!files.length) return [];
-  await verifyReportImages(files);
+  await verifyReportImages(files, ownerId);
   const uploaded = [];
   try {
     for (const file of files) uploaded.push(await uploadReportImage(file.buffer, folder));
