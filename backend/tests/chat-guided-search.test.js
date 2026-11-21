@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import AssistantSession from '../models/AssistantSession.js';
 import FoundItem from '../models/FoundItem.js';
+import LostItem from '../models/LostItem.js';
 import { handleAIChat } from '../controllers/aiChatController.js';
 
 const chat = (body) => new Promise((resolve, reject) => {
@@ -40,6 +41,7 @@ test('guided conversation asks first, searches remembered details, then offers a
   assert.equal(queries.length, 0);
   result = await chat({ ...base, message: 'canteen yesterday', sessionVersion: result.sessionState.version });
   assert.equal(result.items[0].itemName, 'Microphone');
+  assert.match(result.text, /match in found-item reports/);
   assert.match(result.query.message, /Microphone.*Canteen/);
   assert.equal(result.sessionState.nextField, 'uniqueFeatures');
   assert.ok(queries.length > 0);
@@ -49,4 +51,64 @@ test('guided conversation asks first, searches remembered details, then offers a
   assert.equal(result.reportDraft.state, 'reviewing');
   assert.doesNotMatch(result.query.message, /keytag|white/);
   assert.notEqual(record.state, 'submitted');
+});
+
+test('the Singlish finder gets a found draft and read-only pagination of lost matches', async (t) => {
+  const previousEnabled = process.env.AI_ENABLED;
+  process.env.AI_ENABLED = 'false';
+  t.after(() => { if (previousEnabled === undefined) delete process.env.AI_ENABLED; else process.env.AI_ENABLED = previousEnabled; });
+  let record;
+  t.mock.method(AssistantSession, 'findOne', async () => record || null);
+  t.mock.method(AssistantSession, 'create', async (data) => { record = new AssistantSession(data); return record; });
+  const update = t.mock.method(AssistantSession, 'findOneAndUpdate', async (query, changes) => {
+    assert.equal(query.stateVersion, record.stateVersion);
+    record.set(changes.$set);
+    record.stateVersion += 1;
+    return record;
+  });
+  t.mock.method(FoundItem, 'find', () => assert.fail('A finder should only receive matching lost reports'));
+  const find = t.mock.method(LostItem, 'find', () => ({
+    select() { return this; }, sort() { return this; }, limit() { return this; },
+    lean: async () => ['6a9c1b828e518e201dfd3ebb', '6a9c1b828e518e201dfd3ebc'].map((_id) => ({
+      _id, itemName: 'Gaming mouse', category: 'Electronics', description: 'A black gaming mouse', lostLocation: 'Main Library', status: 'pending', lostDate: new Date(),
+    })),
+  }));
+  const base = { sessionId: 'found-mouse-test', locale: 'en', pageSize: 1, history: [] };
+  const first = await chat({ ...base, message: 'gaming mouse ekak hamba una library eke tiyala', sessionVersion: 0 });
+  assert.equal(first.intent, 'found');
+  assert.equal(first.responseStyle, 'singlish');
+  assert.equal(first.reportDraft.fields.itemName, 'Gaming mouse');
+  assert.match(first.reportDraft.fields.location, /library/i);
+  assert.equal(first.reportDraft.fields.storedAt, '');
+  assert.equal(first.sessionState.nextField, 'date');
+  assert.match(first.text, /hoyagaththa item eka report karamu.*Mona dawaseda/);
+  assert.doesNotMatch(first.text, /claim/i);
+  assert.equal(first.actions[0].type, 'report_found');
+  assert.deepEqual(first.items, []);
+  assert.equal(find.mock.callCount(), 0);
+
+  const second = await chat({ ...base, message: 'iye', conversationStyle: 'singlish', sessionVersion: first.sessionState.version });
+  assert.equal(second.items[0].itemType, 'LostItem');
+  assert.equal(second.actions[0].type, 'report_found');
+  assert.match(second.text, /lost reports.*report karapu kenata danwanna/);
+  assert.doesNotMatch(second.text, /claim/i);
+  assert.equal(second.hasMore, true);
+
+  const nextPage = await chat({ ...base, message: second.query.message, conversationStyle: 'singlish', page: 2, sessionVersion: second.sessionState.version });
+  assert.equal(nextPage.page, 2);
+  assert.notEqual(nextPage.items[0]._id, second.items[0]._id);
+  assert.equal(nextPage.sessionState.version, second.sessionState.version);
+  assert.equal(nextPage.sessionState.fields.uniqueFeatures, '');
+  assert.equal(update.mock.callCount(), 2);
+});
+
+test('browsing found reports uses the found inventory without updating a draft', async (t) => {
+  t.mock.method(AssistantSession, 'findOne', () => assert.fail('Browsing should not edit a report session'));
+  t.mock.method(LostItem, 'find', () => assert.fail('Browse found reports must not query the lost inventory'));
+  t.mock.method(FoundItem, 'find', () => ({ select() { return this; }, sort() { return this; }, limit() { return this; }, lean: async () => [] }));
+  const result = await chat({ message: 'Show items found near the library', locale: 'en', sessionId: 'browse-only', sessionVersion: 2 });
+  assert.equal(result.intent, 'search');
+  assert.equal(result.reportDraft, null);
+  assert.deepEqual(result.actions, []);
+  assert.match(result.text, /No matching found-item report/);
 });

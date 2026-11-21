@@ -77,25 +77,29 @@ const fitComposer = (input) => {
 
 const REPORT_DRAFT_COPY = {
   en: {
-    title: (type) => `Reviewable ${type} report draft`, confidence: (value) => `Detected confidence: ${value}%`, review: 'Human review required',
+    title: (type) => `${type === 'found' ? 'Found' : 'Lost'} item draft`, completion: (value) => `${value}% of required details filled in`, review: 'Human review required',
+    storage: 'Kept at', feature: 'Identifying feature',
     item: 'Item', category: 'Category', colour: 'Colour', location: 'Location', dateTime: 'Date/time', stillNeeded: 'Still needed:',
     privacy: 'Remove passwords, full card numbers, private addresses and other sensitive identifiers before submission.', open: 'Open guided report and review fields',
     updated: 'Updated', complete: 'complete', types: { lost: 'lost', found: 'found' }, missing: {},
   },
   singlish: {
-    title: (type) => `Balala confirm karanna puluwan ${type} report draft eka`, confidence: (value) => `Detect karapu confidence eka: ${value}%`, review: 'Manually balanna one',
+    title: (type) => `${type === 'hambuna' ? 'Hambuna' : 'Nathi una'} item eke draft eka`, completion: (value) => `Ona details walin ${value}%k dala`, review: 'Ithuru details balanna',
+    storage: 'Dan thiyena thana', feature: 'Handunaganna lakunaa',
     item: 'Item eka', category: 'Category eka', colour: 'Paata', location: 'Thana', dateTime: 'Dawasa/welawa', stillNeeded: 'Thawa one:',
     privacy: 'Submit karanna kalin passwords, full card numbers, private addresses saha sensitive details ain karanna.', open: 'Guided report eka arala details balanna',
     updated: 'Update kala', complete: 'complete', types: { lost: 'nathi una', found: 'hambuna' }, missing: { 'item name': 'item eke nama', category: 'category eka', 'specific location': 'hari thana', 'date/time': 'dawasa/welawa', 'one unique identifying feature': 'wenama handunaganna lakunayak' },
   },
   si: {
-    title: (type) => `සමාලෝචනය කළ හැකි ${type} වාර්තා කෙටුම්පත`, confidence: (value) => `හඳුනාගත් විශ්වාසය: ${value}%`, review: 'මානව සමාලෝචනය අවශ්‍යයි',
+    title: (type) => `${type} භාණ්ඩ වාර්තා කෙටුම්පත`, completion: (value) => `අවශ්‍ය විස්තරවලින් ${value}%ක් සම්පූර්ණයි`, review: 'විස්තර සමාලෝචනය කරන්න',
+    storage: 'දැන් තබා ඇති තැන', feature: 'හඳුනාගැනීමේ ලක්ෂණය',
     item: 'භාණ්ඩය', category: 'කාණ්ඩය', colour: 'වර්ණය', location: 'ස්ථානය', dateTime: 'දිනය/වේලාව', stillNeeded: 'තව අවශ්‍යයි:',
     privacy: 'ඉදිරිපත් කිරීමට පෙර මුරපද, සම්පූර්ණ කාඩ් අංක, පුද්ගලික ලිපින සහ සංවේදී තොරතුරු ඉවත් කරන්න.', open: 'මාර්ගෝපදේශිත වාර්තාව විවෘත කර විස්තර සමාලෝචනය කරන්න',
     updated: 'යාවත්කාලීන කළා', complete: 'සම්පූර්ණයි', types: { lost: 'නැති වූ', found: 'හමුවූ' }, missing: { 'item name': 'භාණ්ඩයේ නම', category: 'කාණ්ඩය', 'specific location': 'නිශ්චිත ස්ථානය', 'date/time': 'දිනය/වේලාව', 'one unique identifying feature': 'එක් විශේෂ හඳුනාගැනීමේ ලක්ෂණයක්' },
   },
   ta: {
-    title: (type) => `மதிப்பாய்வு செய்யக்கூடிய ${type} அறிக்கை வரைவு`, confidence: (value) => `கண்டறிந்த நம்பிக்கை: ${value}%`, review: 'மனித மதிப்பாய்வு தேவை',
+    title: (type) => `${type} பொருளுக்கான அறிக்கை வரைவு`, completion: (value) => `தேவையான விவரங்களில் ${value}% பூர்த்தியானது`, review: 'விவரங்களைச் சரிபார்க்கவும்',
+    storage: 'தற்போது வைக்கப்பட்டுள்ள இடம்', feature: 'அடையாள அம்சம்',
     item: 'பொருள்', category: 'வகை', colour: 'நிறம்', location: 'இடம்', dateTime: 'தேதி/நேரம்', stillNeeded: 'இன்னும் தேவை:',
     privacy: 'சமர்ப்பிக்கும் முன் கடவுச்சொற்கள், முழு அட்டை எண்கள், தனிப்பட்ட முகவரிகள் மற்றும் முக்கிய தகவல்களை அகற்றவும்.', open: 'வழிகாட்டப்பட்ட அறிக்கையைத் திறந்து விவரங்களை மதிப்பாய்வு செய்யவும்',
     updated: 'புதுப்பிக்கப்பட்டது', complete: 'நிறைவு', types: { lost: 'தொலைந்த', found: 'கண்டெடுத்த' }, missing: { 'item name': 'பொருளின் பெயர்', category: 'வகை', 'specific location': 'குறிப்பிட்ட இடம்', 'date/time': 'தேதி/நேரம்', 'one unique identifying feature': 'ஒரு தனிப்பட்ட அடையாள அம்சம்' },
@@ -157,20 +161,23 @@ const ReportDraftCard = ({ draft, onStart, onApprove, isSubmitting, canApprove, 
   if (!draft?.fields) return null;
   const copy = REPORT_DRAFT_COPY[responseStyle] || REPORT_DRAFT_COPY.en;
   const dateLocale = responseStyle === 'si' ? 'si-LK' : responseStyle === 'ta' ? 'ta-LK' : 'en-LK';
+  const guidedProgress = Number.isInteger(draft.version) && Number.isFinite(draft.confidence) ? draft.confidence : null;
   const details = [
     [copy.item, draft.fields.itemName],
     [copy.category, draft.fields.category],
     [copy.colour, draft.fields.colors],
     [copy.location, draft.fields.location],
     [copy.dateTime, draft.fields.date ? new Date(draft.fields.date).toLocaleString(dateLocale) : ''],
+    [copy.storage, draft.fields.storedAt],
   ].filter(([, value]) => value);
-  const localizedMissing = draft.missing?.map((entry) => copy.missing[entry] || entry) || [];
+  const fieldLabels = { itemName: copy.item, category: copy.category, location: copy.location, date: copy.dateTime, uniqueFeatures: copy.feature, storedAt: copy.storage };
+  const localizedMissing = draft.missing?.map((entry) => fieldLabels[entry] || copy.missing[entry] || entry) || [];
   return (
     <section className="mt-3 w-full rounded-2xl border border-primary-200 bg-primary-50/70 p-4 dark:border-primary-900/60 dark:bg-primary-950/25" aria-label={t('assistant.draftAria')}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <p className="text-xs font-bold uppercase tracking-wide text-primary-700 dark:text-primary-300">{copy.title(copy.types[draft.reportType] || draft.reportType)}</p>
-          <p className="mt-1 text-sm text-surface-700 dark:text-surface-200">{copy.confidence(draft.confidence)}</p>
+          {guidedProgress !== null && <p className="mt-1 text-sm text-surface-700 dark:text-surface-200">{copy.completion(guidedProgress)}</p>}
         </div>
         <span className="rounded-full bg-white px-2.5 py-1 text-xs font-bold text-primary-700 shadow-sm dark:bg-surface-900 dark:text-primary-300">{copy.review}</span>
       </div>
@@ -188,11 +195,6 @@ const ReportDraftCard = ({ draft, onStart, onApprove, isSubmitting, canApprove, 
         <button type="button" disabled={isSubmitting} onClick={() => onApprove(draft)} className="mt-2 flex min-h-11 w-full items-center justify-center rounded-xl border border-emerald-500 bg-emerald-600 px-4 text-sm font-bold text-white hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-60">
           {isSubmitting ? t('assistant.submittingReport') : t('assistant.approveSubmit')}
         </button>
-      )}
-      {Number.isFinite(draft.confidence) && (
-        <div className="mt-3" aria-label={`${draft.confidence}% ${copy.complete}`}>
-          <div className="h-1.5 overflow-hidden rounded-full bg-primary-100 dark:bg-primary-950"><div className="h-full rounded-full bg-primary-600 transition-all" style={{ width: `${Math.max(0, Math.min(100, draft.confidence))}%` }} /></div>
-        </div>
       )}
       {draft.changedFields?.length > 0 && (
         <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/25 dark:text-emerald-200">
@@ -542,7 +544,7 @@ const AIChatbot = () => {
       const data = response.data?.data || {};
       if (Number.isFinite(data.sessionState?.version)) setSessionVersion(data.sessionState.version);
       setMessages((previous) => [
-        ...previous.map((entry) => entry.reportDraft ? { ...entry, reportDraft: null } : entry),
+        ...(data.reportDraft ? previous.map((entry) => entry.reportDraft ? { ...entry, reportDraft: null } : entry) : previous),
         {
           role: 'ai',
           content: data.text || t('assistant.noResponse'),
@@ -572,6 +574,7 @@ const AIChatbot = () => {
         actions: [
           { type: 'search', label: t('assistant.openSearch'), url: '/lost-items' },
           { type: 'report_lost', label: t('assistant.reportLost'), url: '/dashboard/report-lost' },
+          { type: 'report_found', label: t('home.reportFound'), url: '/dashboard/report-found' },
         ],
       }]);
     } finally {
@@ -835,7 +838,7 @@ const AIChatbot = () => {
                 </div>
               )}
 
-              {message.actions?.length > 0 && (
+              {!message.reportDraft && message.actions?.length > 0 && (
                 <div className="mt-3 flex w-full flex-wrap gap-2">
                   {message.actions.map((action) => {
                     const safeUrl = toSafeInternalPath(action.url, '');
@@ -848,7 +851,7 @@ const AIChatbot = () => {
                 </div>
               )}
 
-              {message.meta?.notice && (
+              {message.meta?.notice && message.meta.source !== 'Public Smart L&F reports' && (
                 <div className="mt-3 flex w-full gap-2 rounded-xl border border-amber-200/80 bg-amber-50/70 p-3 text-xs text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
                   <FiAlertCircle className="mt-0.5 shrink-0" aria-hidden="true" />
                   <div><strong>{message.meta.notice}</strong><div className="mt-0.5 font-normal text-amber-800/90 dark:text-amber-300/80">{t('assistant.source', { source: message.meta.source })}</div></div>

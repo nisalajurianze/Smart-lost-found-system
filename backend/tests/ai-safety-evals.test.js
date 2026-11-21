@@ -37,13 +37,14 @@ test('AI output guard rejects private values and unsafe object keys', () => {
 
 test('prompt registry provides stable purpose-specific versions', () => {
   assert.equal(promptVersionForPurpose('assistant-chat'), 'assistant-chat-v2');
+  assert.equal(promptVersionForPurpose('conversation-extraction'), 'conversation-extraction-v2');
   assert.equal(promptVersionForPurpose('unknown-purpose'), 'generic-v1');
 });
 
 test('offline multilingual golden AI eval corpus passes completely', () => {
   const report = runGoldenEvals();
-  assert.equal(report.datasetVersion, 'golden-v2');
-  assert.equal(report.total, 17);
+  assert.equal(report.datasetVersion, 'golden-v3');
+  assert.equal(report.total, 18);
   assert.equal(report.failed, 0, JSON.stringify(report.results.filter((entry) => !entry.passed), null, 2));
   assert.equal(report.passRate, 100);
   assert.ok(report.byLanguage.singlish.passed >= 2);

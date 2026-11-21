@@ -1,7 +1,7 @@
 const STOP_WORDS = new Set([
   'the', 'and', 'for', 'with', 'that', 'this', 'have', 'from', 'was', 'were', 'what', 'where',
   'lost', 'found', 'find', 'item', 'items', 'something', 'please', 'help', 'mage', 'eka', 'ekak',
-  'nathi', 'una', 'hambuna', 'thiyenawa', 'tiyenawa', 'mama', 'mata', 'api', 'can', 'you',
+  'nathi', 'una', 'hamba', 'hambu', 'hambuna', 'eke', 'tiyala', 'thiyala', 'thiyenawa', 'tiyenawa', 'mama', 'mata', 'api', 'can', 'you',
   'මගේ', 'එක', 'නැති', 'වුණා', 'හමු', 'වුණේ', 'මට', 'உடைய', 'என்', 'காணாமல்', 'கிடைத்தது',
 ]);
 
@@ -65,7 +65,7 @@ const SINGLISH_MARKERS = new Set([
   'krnna', 'karala', 'wenawa', 'una', 'nathi', 'nane', 'naane',
   'thiyenawa', 'tiyenawa', 'one', 'ona', 'puluwan', 'berida',
   'laga', 'gawa', 'issarahata', 'issrht', 'hariyata', 'harida',
-  'balanna', 'blnna', 'denna', 'dnna', 'hoyanna', 'hambuna',
+  'balanna', 'blnna', 'denna', 'dnna', 'hoyanna', 'hambuna', 'hamba', 'hambu', 'tiyala',
 ]);
 
 const STRONG_SINGLISH_MARKERS = new Set([
@@ -126,16 +126,24 @@ export const resolveConversationStyle = (message, history = [], locale = 'en', p
   return ['si', 'ta'].includes(locale) ? locale : 'en';
 };
 
+const FOUND_SIGNAL = /\b(?:found|hambunaa?|hamb(?:a|u) (?:w?unaa?|wela))\b|හමු|கண்டெடுத்த|கிடைத்த/u;
+const LOST_SIGNAL = /\b(?:lost|nath?i|naathi|missing)\b|නැති|අහිමි|காணாமல்|தொலைந்த/u;
+const LOOKING_FOR_OWN_ITEM = /\b(?:has|have|did) (?:anyone|anybody|someone) (?:found|find)\b|\b(?:find|find me|look for|search for) my\b|\b(?:havent|have not|didnt|did not) found\b/u;
+
 export const inferIntent = (value) => {
   const text = normalizeText(value);
-  // Asking whether somebody found MY missing item is a lost-item search.
-  if (/\b(?:has|have|did) (?:anyone|anybody|someone) (?:found|find)\b/u.test(text)
-    || /\b(?:my|mage|mge)\b.*\b(?:lost|nathi)\b/u.test(text)) return 'lost';
-  const foundSignals = ['found', 'hambuna', 'hambu una', 'හමු', 'கண்ட', 'கிடைத்த'];
-  const lostSignals = ['lost', 'nathi', 'නැති', 'අහිමි', 'காணாமல்', 'தொலைந்த'];
-  if (foundSignals.some((signal) => text.includes(normalizeText(signal)))) return 'found';
-  if (lostSignals.some((signal) => text.includes(normalizeText(signal)))) return 'lost';
-  return 'search';
+  if (LOOKING_FOR_OWN_ITEM.test(text)) return 'lost';
+  const found = FOUND_SIGNAL.test(text);
+  const lost = LOST_SIGNAL.test(text);
+  return found === lost ? 'search' : found ? 'found' : 'lost';
+};
+
+export const reportTypeForLookup = (value) => {
+  const text = normalizeText(value);
+  if (LOOKING_FOR_OWN_ITEM.test(text)) return 'found';
+  const browsing = /\b(?:show|list|browse|pennanna)\b|පෙන්වන්න|லிஸ்ட்|காட்ட/u.test(text);
+  const type = inferIntent(text);
+  return browsing && type !== 'search' ? type : null;
 };
 
 export const isReportRequest = (value) => {
@@ -196,14 +204,15 @@ export const expandKeywords = (value, maxTerms = 24) => {
 };
 
 const FOLLOW_UP_ONLY = /^(show more|more|same|again|continue|තව|තවත්|மேலும்|இன்னும்)$/iu;
+export const isSearchFollowUp = (value) => FOLLOW_UP_ONLY.test(String(value || '').trim());
 
 export const resolveSearchMessage = (message, history = []) => {
   const current = String(message || '').trim();
-  if (!FOLLOW_UP_ONLY.test(current)) return current;
+  if (!isSearchFollowUp(current)) return current;
   const safeHistory = Array.isArray(history) ? history.slice(-10) : [];
   for (let index = safeHistory.length - 1; index >= 0; index -= 1) {
     const entry = safeHistory[index];
-    if (entry?.role === 'user' && entry.content && !FOLLOW_UP_ONLY.test(String(entry.content).trim()) && !isGreetingOnly(entry.content)) {
+    if (entry?.role === 'user' && entry.content && !isSearchFollowUp(entry.content) && !isGreetingOnly(entry.content)) {
       return String(entry.content).slice(0, 500);
     }
   }

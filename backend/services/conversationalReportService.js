@@ -2,6 +2,8 @@ import { normalizeText } from './chatSearchService.js';
 import { publicLocationView, resolveLocation } from './locationIntelligenceService.js';
 
 const ITEM_TYPES = [
+  { canonical: 'Gaming mouse', category: 'Electronics', aliases: ['gaming mouse'] },
+  { canonical: 'Computer mouse', category: 'Electronics', aliases: ['computer mouse', 'wireless mouse', 'mouse', 'මවුස්', 'மவுஸ்'] },
   { canonical: 'Battery', category: 'Electronics', aliases: ['battery', 'batteries', 'battry', 'battary'] },
   { canonical: 'Microphone', category: 'Electronics', aliases: ['microphone', 'mic', 'mics', 'මයික්', 'මයික්‍රොෆෝනය', 'மைக்ரோஃபோன்'] },
   { canonical: 'Mobile phone', category: 'Electronics', aliases: ['phone', 'mobile', 'smartphone', 'fone', 'ෆෝන්', 'දුරකථන', 'மொபைல்', 'தொலைபேசி'] },

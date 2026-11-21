@@ -10,6 +10,8 @@ test('context extraction accepts quoted corrections, rejects fabricated evidence
   assert.ok(!validateConversationExtraction({ updates: { location: { value: 'Canteen', evidence: 'canteen' } } }, message));
   assert.ok(!validateConversationExtraction({ updates: { state: { value: 'submitted', evidence: 'microphone' } } }, message));
   assert.ok(!validateConversationExtraction({ updates: { date: { value: 'not-a-date', evidence: 'microphone' } } }, message));
+  assert.ok(!validateConversationExtraction({ updates: { date: { value: '2026-11-21T09:00', evidence: 'library' } } }, 'mouse ekak hamba una library eke'));
+  assert.ok(validateConversationExtraction({ updates: { date: { value: '2026-11-20T00:00', evidence: 'iye' } } }, 'iye library eke'));
 });
 
 test('fallback parses nouns on word boundaries and does not infer today from arbitrary words', () => {

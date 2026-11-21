@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { handleAIChat, normalizeAssistantResponse, withRelevantItemEmoji } from '../controllers/aiChatController.js';
+import { handleAIChat, withRelevantItemEmoji } from '../controllers/aiChatController.js';
 import FoundItem from '../models/FoundItem.js';
 import LostItem from '../models/LostItem.js';
 
@@ -121,9 +121,9 @@ test('a report request asks for lost or found before searching public reports', 
   assert.deepEqual(response.payload.data.actions.map(({ type }) => type), ['report_lost', 'report_found']);
 });
 
-test('provider replies keep a valid reply when optional quick replies are malformed', () => {
-  assert.deepEqual(normalizeAssistantResponse({ reply: 'Hari, mama balannam.', quickReplies: 'not-an-array' }), {
-    reply: 'Hari, mama balannam.',
-    quickReplies: [],
-  });
+test('finder handover guidance offers a found report instead of a claimant workflow', async () => {
+  const { payload: { data } } = await invokeChat({ message: 'I found a mouse. How do I return it to the owner?', locale: 'en' });
+  assert.deepEqual(data.actions.map(({ type }) => type), ['report_found']);
+  assert.match(data.text, /Report the found item/);
+  assert.doesNotMatch(data.text, /claim|ownership evidence/i);
 });
