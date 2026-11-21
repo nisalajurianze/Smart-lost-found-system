@@ -3,6 +3,46 @@ import assert from 'node:assert/strict';
 
 const enabled = process.env.RUN_DB_INTEGRATION === 'true' && Boolean(process.env.MONGO_URI || process.env.MONGODB_URI);
 
+test('multiple manual reports can be submitted alongside legacy null IDs and unique assistant IDs', { skip: !enabled }, async () => {
+  const mongoose = (await import('mongoose')).default;
+  const LostItem = (await import('../models/LostItem.js')).default;
+  const FoundItem = (await import('../models/FoundItem.js')).default;
+  const { createLostItem } = await import('../controllers/lostItemController.js');
+  const { createFoundItem } = await import('../controllers/foundItemController.js');
+  const uri = process.env.MONGO_URI || process.env.MONGODB_URI;
+  await mongoose.connect(uri, { dbName: `smart_lf_report_ids_${Date.now()}` });
+  try {
+    const userId = new mongoose.Types.ObjectId();
+    const item = {
+      userId, category: 'Bags', itemName: 'Red backpack', description: 'A red backpack with a black zipper.',
+    };
+    for (const [Model, createReport, type] of [[LostItem, createLostItem, 'lost'], [FoundItem, createFoundItem, 'found']]) {
+      await Model.createIndexes();
+      const body = { ...item, [`${type}Location`]: 'SEUSL Main Library', [`${type}Date`]: new Date() };
+      const legacy = await Model.create({ ...body, assistantSubmissionId: null });
+      const submit = (itemName) => new Promise((resolve, reject) => createReport(
+        { user: { _id: userId }, files: [], body: { ...body, itemName } },
+        { status: (status) => ({ json: ({ data }) => resolve({ status, data }) }) },
+        reject,
+      ));
+      const first = await submit('Blue backpack');
+      const second = await submit('Green backpack');
+      assert.equal(first.status, 201);
+      assert.equal(second.status, 201);
+      assert.notEqual(first.data._id, second.data._id);
+      assert.equal(await Model.countDocuments({ assistantSubmissionId: { $exists: false } }), 2);
+      assert.equal((await Model.findById(legacy._id).lean()).assistantSubmissionId, null);
+
+      const assistantSubmissionId = new mongoose.Types.ObjectId();
+      await Model.create({ ...body, assistantSubmissionId });
+      await assert.rejects(Model.create({ ...body, assistantSubmissionId }), { code: 11000 });
+    }
+  } finally {
+    await mongoose.connection.dropDatabase().catch(() => undefined);
+    await mongoose.disconnect();
+  }
+});
+
 test('report settings persist and keep contact private through a matched claim', { skip: !enabled }, async () => {
   const mongoose = (await import('mongoose')).default;
   const User = (await import('../models/User.js')).default;

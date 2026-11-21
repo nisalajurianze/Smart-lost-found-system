@@ -20,6 +20,9 @@ test('one confirmation exists per assistant session and item creation is idempot
   for (const Model of [LostItem, FoundItem]) {
     const submissionIndex = Model.schema.indexes().find(([keys, options]) => keys.assistantSubmissionId === 1 && options.unique && options.sparse);
     assert.ok(submissionIndex);
+    assert.equal(Object.hasOwn(new Model().toObject(), 'assistantSubmissionId'), false);
+    const assistantSubmissionId = new AssistantSubmission()._id;
+    assert.equal(String(new Model({ assistantSubmissionId }).assistantSubmissionId), String(assistantSubmissionId));
   }
 });
 
